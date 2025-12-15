@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0 0;
+  --foreground: 212 175 55;
+}
+
+body {
+  background-color: #000000; /* Черный фон */
+  color: #D4AF37; /* Золотой текст */
+  font-family: sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Стиль для заголовков */
+h1, h2, h3 {
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
