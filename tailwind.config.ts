@@ -9,17 +9,8 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        void: "#000000",
-        gold: {
-          DEFAULT: "#D4AF37",
-          dim: "rgba(212, 175, 55, 0.1)",
-          glow: "rgba(212, 175, 55, 0.3)",
-        },
-        surface: "#0A0A0A",
-      },
-      fontFamily: {
-        sans: ["var(--font-inter)", "sans-serif"],
-        serif: ["var(--font-cinzel)", "serif"],
+        background: "#000000",
+        foreground: "#D4AF37",
       },
     },
   },
