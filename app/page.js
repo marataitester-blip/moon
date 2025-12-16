@@ -3,8 +3,11 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- НАСТРОЙКИ ---
-const SESSION_TIMEOUT = 3 * 60 * 1000; // 3 минуты
-const PASSWORD = 'MOON2024';
+const PIN_CODE = '7019';
+const SESSION_KEY = 'luna_session_token'; 
+
+// Цвет: Матовое золото (используем через style, так как в Tailwind его нет по умолчанию)
+const GOLD_COLOR = '#C5A059'; 
 
 // Инициализация Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,9 +15,11 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function LunaApp() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-  const [loginError, setLoginError] = useState(false);
+  // Состояния экранов: 'landing' | 'login' | 'chat'
+  const [currentView, setCurrentView] = useState('landing');
+  
+  const [pin, setPin] = useState('');
+  const [isError, setIsError] = useState(false);
   
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -22,50 +27,49 @@ export default function LunaApp() {
   const [showVision, setShowVision] = useState(false);
   const [visionPrompt, setVisionPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const messagesEndRef = useRef(null);
-  const activityTimerRef = useRef(null);
+  const inputRef = useRef(null); // Фокус для ввода пин-кода
 
-  // --- ЛОГИКА ЗАЩИТЫ ---
-  const resetTimer = () => {
-    if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
-    if (isLoggedIn) {
-      activityTimerRef.current = setTimeout(() => {
-        setIsLoggedIn(false);
-        localStorage.removeItem('luna_auth');
-      }, SESSION_TIMEOUT);
+  // --- 1. ЛОГИКА ВХОДА И СЕССИИ ---
+  
+  useEffect(() => {
+    // Проверяем, открыта ли сессия (sessionStorage умирает при закрытии вкладки)
+    const session = sessionStorage.getItem(SESSION_KEY);
+    if (session === 'active') {
+      setCurrentView('chat');
+    }
+  }, []);
+
+  // Обработка ввода ПИН-кода
+  const handlePinChange = (value) => {
+    if (value.length > 4) return;
+    
+    setPin(value);
+    setIsError(false);
+
+    // Авто-вход при 4 цифрах
+    if (value.length === 4) {
+      if (value === PIN_CODE) {
+        sessionStorage.setItem(SESSION_KEY, 'active');
+        setCurrentView('chat');
+      } else {
+        setIsError(true);
+        setTimeout(() => setPin(''), 500); // Сброс при ошибке
+      }
     }
   };
 
-  useEffect(() => {
-    const savedAuth = localStorage.getItem('luna_auth');
-    if (savedAuth === 'true') setIsLoggedIn(true);
-
-    const events = ['mousemove', 'keydown', 'click', 'scroll'];
-    events.forEach(event => window.addEventListener(event, resetTimer));
-    resetTimer();
-
-    return () => {
-      events.forEach(event => window.removeEventListener(event, resetTimer));
-      if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
-    };
-  }, [isLoggedIn]);
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (passwordInput === PASSWORD) {
-      setIsLoggedIn(true);
-      localStorage.setItem('luna_auth', 'true');
-      setLoginError(false);
-    } else {
-      setLoginError(true);
-      setTimeout(() => setLoginError(false), 500);
-    }
+  // Фокус на скрытое поле ввода при клике на точки
+  const focusInput = () => {
+    inputRef.current?.focus();
   };
 
-  // --- ЧАТ И ГЕНЕРАЦИЯ ---
+  // --- 2. ЛОГИКА ЧАТА ---
+
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (currentView !== 'chat') return;
 
     const fetchMessages = async () => {
       const { data } = await supabase
@@ -81,10 +85,13 @@ export default function LunaApp() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         setMessages((prev) => [...prev, payload.new]);
       })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, () => {
+         setMessages([]); // Очищаем экран если база очищена
+      })
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [isLoggedIn]);
+  }, [currentView]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -98,6 +105,24 @@ export default function LunaApp() {
     setNewMessage('');
   };
 
+  // Удаление переписки
+  const clearHistory = async () => {
+    if (!confirm('LUNA: Удалить воспоминания навсегда?')) return;
+    setIsDeleting(true);
+    
+    // Удаляем все сообщения (так как RLS отключен, это сработает)
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .neq('id', 0); // Удалить всё, где ID не 0 (то есть всё)
+
+    if (error) alert('Ошибка удаления');
+    setMessages([]);
+    setIsDeleting(false);
+  };
+
+  // --- 3. ЛОГИКА ГЕНЕРАЦИИ (POLLINATIONS) ---
+  
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!visionPrompt.trim()) return;
@@ -120,94 +145,145 @@ export default function LunaApp() {
           is_mine: true,
           image_url: data.imageUrl
         }]);
-      } else {
-        alert('Ошибка: ' + (data.error || 'Не удалось создать образ'));
       }
     } catch (err) {
       console.error(err);
-      alert('Ошибка связи с Луной');
     } finally {
       setIsGenerating(false);
       setVisionPrompt('');
     }
   };
 
-  // --- ЭКРАНЫ ---
-  if (!isLoggedIn) {
+  // --- ЭКРАН 1: ЛУНА (LANDING) ---
+  if (currentView === 'landing') {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-black text-white font-sans p-4">
-        <h1 className="text-3xl font-bold mb-8 text-yellow-500 tracking-[0.3em]">LUNA ACCESS</h1>
-        <form onSubmit={handleLogin} className="flex flex-col gap-6 w-full max-w-xs">
-          <input 
-            type="password" 
-            placeholder="PASSWORD"
-            value={passwordInput}
-            onChange={(e) => setPasswordInput(e.target.value)}
-            className={`bg-black border-2 ${loginError ? 'border-red-600 animate-pulse' : 'border-yellow-600'} text-center text-yellow-500 text-xl py-3 outline-none placeholder-gray-800`}
-          />
-          <button type="submit" className="bg-yellow-600 text-black font-bold py-3 uppercase tracking-widest hover:bg-yellow-500 transition">
-            Enter
-          </button>
-        </form>
+      <div className="flex flex-col h-screen items-center justify-center bg-black text-white font-sans animate-fade-in">
+        <button 
+          onClick={() => setCurrentView('login')}
+          className="group flex flex-col items-center transition-transform active:scale-95 focus:outline-none"
+        >
+           {/* Изображение Луны (SVG) */}
+           <div className="w-48 h-48 rounded-full bg-black shadow-[0_0_50px_-10px_rgba(197,160,89,0.3)] border border-[#333] flex items-center justify-center mb-8 group-hover:shadow-[0_0_70px_-5px_rgba(197,160,89,0.5)] transition-all duration-700">
+              <div className="w-44 h-44 rounded-full bg-gradient-to-br from-[#222] to-[#000] relative overflow-hidden">
+                 {/* Кратеры */}
+                 <div className="absolute top-8 left-10 w-8 h-8 rounded-full bg-[#1a1a1a] opacity-50"></div>
+                 <div className="absolute bottom-12 right-12 w-12 h-12 rounded-full bg-[#1a1a1a] opacity-40"></div>
+                 <div className="absolute top-20 right-8 w-4 h-4 rounded-full bg-[#1a1a1a] opacity-60"></div>
+              </div>
+           </div>
+           
+           <h1 style={{ color: GOLD_COLOR }} className="text-2xl font-bold tracking-[0.5em] opacity-80 group-hover:opacity-100 transition-opacity">
+             LUNA
+           </h1>
+        </button>
       </div>
     );
   }
 
+  // --- ЭКРАН 2: ПИН-КОД (LOGIN) ---
+  if (currentView === 'login') {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-black" onClick={focusInput}>
+        {/* Скрытый инпут для клавиатуры */}
+        <input 
+          ref={inputRef}
+          type="tel" // Цифровая клавиатура на мобильном
+          pattern="[0-9]*"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => handlePinChange(e.target.value)}
+          autoComplete="off"
+          className="opacity-0 absolute w-1 h-1"
+          autoFocus
+        />
+
+        {/* 4 Точки */}
+        <div className="flex gap-6">
+          {[0, 1, 2, 3].map((index) => (
+            <div 
+              key={index}
+              style={{ 
+                borderColor: isError ? 'red' : GOLD_COLOR,
+                backgroundColor: pin.length > index ? (isError ? 'red' : GOLD_COLOR) : 'transparent'
+              }}
+              className={`w-4 h-4 rounded-full border-2 transition-all duration-300 ${isError ? 'animate-shake' : ''}`}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // --- ЭКРАН 3: ЧАТ (MAIN) ---
   return (
     <div className="flex flex-col h-screen bg-black text-white font-sans relative">
+      {/* Хедер */}
       <header className="p-4 bg-black/90 border-b border-gray-900 flex justify-between items-center sticky top-0 z-10 backdrop-blur">
-        <h1 className="text-xl font-bold tracking-widest text-yellow-500">LUNA</h1>
-        <button onClick={() => { setIsLoggedIn(false); localStorage.removeItem('luna_auth'); }} className="text-xs text-gray-500 uppercase">Exit</button>
+        <h1 style={{ color: GOLD_COLOR }} className="text-xl font-bold tracking-widest">LUNA</h1>
+        <div className="flex gap-4">
+          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-500 transition-colors" title="Delete History">
+            🗑️
+          </button>
+          <button onClick={() => { sessionStorage.removeItem(SESSION_KEY); setCurrentView('landing'); setPin(''); }} className="text-xs text-gray-600 hover:text-white uppercase tracking-widest">
+            Exit
+          </button>
+        </div>
       </header>
 
+      {/* Список сообщений */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] p-3 rounded-2xl ${msg.is_mine ? 'bg-yellow-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
+            <div 
+              style={{ backgroundColor: msg.is_mine ? 'rgba(197, 160, 89, 0.2)' : '#1f2937', borderColor: msg.is_mine ? GOLD_COLOR : 'transparent' }}
+              className={`max-w-[85%] p-3 rounded-2xl border ${msg.is_mine ? 'rounded-br-none' : 'rounded-bl-none text-gray-300'}`}
+            >
               {msg.image_url && (
-                <div className="mb-2 rounded-lg overflow-hidden">
+                <div className="mb-3 rounded-lg overflow-hidden border border-gray-800">
                   <img src={msg.image_url} alt="Vision" className="w-full h-auto" />
                 </div>
               )}
-              <p>{msg.content}</p>
+              <p className="leading-relaxed text-sm md:text-base">{msg.content}</p>
             </div>
           </div>
         ))}
-        {isGenerating && <div className="text-right text-xs text-yellow-500 animate-pulse">Creating vision...</div>}
+        {isGenerating && <div style={{ color: GOLD_COLOR }} className="text-right text-xs animate-pulse">Vision is manifesting...</div>}
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Ввод */}
       <div className="p-4 bg-black border-t border-gray-900">
-        <form onSubmit={sendMessage} className="flex gap-2 max-w-3xl mx-auto">
-          <button type="button" onClick={() => setShowVision(true)} className="text-2xl px-2">👁️</button>
+        <form onSubmit={sendMessage} className="flex gap-3 max-w-3xl mx-auto items-center">
+          <button type="button" onClick={() => setShowVision(true)} className="text-xl opacity-70 hover:opacity-100 transition">👁️</button>
           <input 
             type="text" 
             value={newMessage} 
             onChange={(e) => setNewMessage(e.target.value)} 
-            placeholder="Write..." 
-            className="flex-1 bg-gray-900 rounded-full px-4 outline-none border border-gray-800 focus:border-yellow-600"
+            placeholder="..." 
+            className="flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700"
           />
-          <button type="submit" className="text-yellow-500 font-bold px-4">➤</button>
+          <button type="submit" style={{ color: GOLD_COLOR }} className="text-2xl hover:scale-110 transition-transform">➤</button>
         </form>
       </div>
 
+      {/* Модальное окно Vision */}
       {showVision && (
-        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-gray-900 p-6 rounded-xl border border-yellow-600/30">
-            <h2 className="text-yellow-500 mb-4 tracking-widest text-center font-bold">LUNA VISION</h2>
+        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-6">
+          <div className="w-full max-w-md bg-[#0a0a0a] p-8 rounded-2xl border border-[#333] shadow-2xl">
+            <h2 style={{ color: GOLD_COLOR }} className="mb-6 tracking-[0.2em] text-center text-sm font-bold uppercase">Luna Vision</h2>
             <textarea 
               value={visionPrompt} 
               onChange={(e) => setVisionPrompt(e.target.value)} 
-              placeholder="What do you see?" 
-              className="w-full bg-black border border-gray-700 rounded p-3 h-32 mb-4 text-white outline-none focus:border-yellow-500"
+              placeholder="Describe the dream..." 
+              className="w-full bg-black border border-gray-800 rounded p-4 h-32 mb-6 text-gray-300 outline-none focus:border-[#C5A059] resize-none"
             />
-            <div className="flex gap-2">
-              <button onClick={() => setShowVision(false)} className="flex-1 py-3 border border-gray-700 rounded text-gray-400">Cancel</button>
-              <button onClick={handleGenerate} className="flex-1 py-3 bg-yellow-600 text-black font-bold rounded">Dream</button>
+            <div className="flex gap-4">
+              <button onClick={() => setShowVision(false)} className="flex-1 py-3 text-gray-500 hover:text-white transition">Close</button>
+              <button onClick={handleGenerate} style={{ color: GOLD_COLOR, borderColor: GOLD_COLOR }} className="flex-1 py-3 border rounded hover:bg-[#C5A059] hover:text-black transition font-bold uppercase text-xs tracking-widest">Manifest</button>
             </div>
           </div>
         </div>
       )}
     </div>
   );
-}
+        }
