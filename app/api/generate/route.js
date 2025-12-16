@@ -7,20 +7,16 @@ export async function POST(request) {
     
     const seed = Math.floor(Math.random() * 1000000);
     
-    // --- НОВЫЙ СТИЛЬ: ЖЕСТКИЙ РЕАЛИЗМ И ТОЧНОСТЬ ---
-    // Мы убираем фэнтези и киношность.
-    // Ключевые слова:
-    // - "Raw photograph" (сырая фотография, без фильтров)
-    // - "gritty realism" (суровый/зернистый реализм)
-    // - "natural light" (естественный свет)
-    // - "documentary style" (документальный стиль, фиксация реальности)
-    // - "STRICTLY accurate to description" (СТРОГО точно по описанию - это приказ нейросети не выдумывать)
-    const finalPrompt = `Raw photograph, gritty realism, natural light, documentary style, highly detailed, sharp focus, 8k, STRICTLY accurate to description: ${prompt}`;
+    // --- НОВЫЙ СТИЛЬ: ЭПИЧЕСКАЯ КЛАССИКА И РОМАНТИЗМ ---
+    // Референсы: "Pride and Prejudice", "Downton Abbey", "Gone with the Wind".
+    // Ключевые слова: Cinematic period drama aesthetic, rich colors, soft dramatic lighting, elegant composition.
+    // Мы просим "Atmospheric storytelling" (атмосферное повествование), чтобы избежать простых портретов.
+    const finalPrompt = `Cinematic period drama aesthetic, style of Pride and Prejudice and Downton Abbey, romantic realism, rich textures, soft dramatic lighting, elegant composition, atmospheric storytelling, Gone with the Wind visual style, masterpiece, 8k, highly detailed: ${prompt}`;
     
     // Используем Pollinations (модель Flux)
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
 
-    console.log("Генерация (Жесткий реализм):", imageUrl);
+    console.log("Генерация (Кино-Романтика):", imageUrl);
 
     return NextResponse.json({ imageUrl });
 
