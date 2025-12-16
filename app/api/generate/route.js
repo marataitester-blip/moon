@@ -7,15 +7,19 @@ export async function POST(request) {
     
     const seed = Math.floor(Math.random() * 1000000);
     
-    // --- НОВЫЙ СТИЛЬ: ФОКУС НА ПЕРСОНАЖЕ И ЭМОЦИЯХ ---
-    // Мы говорим: "Фокус на портрете, дизайн персонажа, выразительное лицо".
-    // Фон станет размытым или менее важным.
-    const finalPrompt = `Character portrait, focus on subject, expressive face, high fantasy realism, dramatic lighting, detailed texture, masterpiece, 8k, emotional, psychological: ${prompt}`;
+    // --- НОВЫЙ СТИЛЬ: СЮЖЕТ, ПОЛНЫЙ РОСТ, КОМПОЗИЦИЯ ---
+    // Мы добавляем ключевые слова:
+    // - "Narrative scene" (повествовательная сцена - для сюжета)
+    // - "full body view or three-quarter view" (полный рост или три четверти)
+    // - "masterful composition" (мастерская композиция)
+    // - "cinematic lighting" (киношный свет)
+    // - "detailed environment conveying plot" (детализированное окружение, раскрывающее сюжет)
+    const finalPrompt = `Narrative scene, full body view or three-quarter view character, masterful composition, cinematic storytelling, dramatic lighting, high fantasy realism, detailed environment conveying plot, expressive pose, masterpiece, 8k, emotional atmosphere: ${prompt}`;
     
     // Используем Pollinations (модель Flux)
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
 
-    console.log("Генерация (Портретный фокус):", imageUrl);
+    console.log("Генерация (Сюжет и композиция):", imageUrl);
 
     return NextResponse.json({ imageUrl });
 
