@@ -5,9 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 // --- НАСТРОЙКИ ---
 const PIN_CODE = '7019';
 const SESSION_KEY = 'luna_session_token'; 
-const INACTIVITY_LIMIT = 3 * 60 * 1000; // 3 минуты бездействия
+const INACTIVITY_LIMIT = 3 * 60 * 1000; // 3 минуты
 
-// Цвет: Матовое золото
 const GOLD_COLOR = '#C5A059'; 
 
 // Инициализация Supabase
@@ -16,13 +15,16 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function LunaApp() {
-  const [currentView, setCurrentView] = useState('landing'); // landing | login | chat
+  const [currentView, setCurrentView] = useState('landing'); 
   const [pin, setPin] = useState('');
   const [isError, setIsError] = useState(false);
   
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   
+  // Состояние для ОНЛАЙНА
+  const [onlineCount, setOnlineCount] = useState(0);
+
   const [showVision, setShowVision] = useState(false);
   const [visionPrompt, setVisionPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -32,8 +34,7 @@ export default function LunaApp() {
   const inputRef = useRef(null);
   const timerRef = useRef(null);
 
-  // --- 1. ЛОГИКА ТАЙМЕРА БЕЗОПАСНОСТИ ---
-  
+  // --- 1. ТАЙМЕР БЕЗОПАСНОСТИ ---
   const logout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setCurrentView('landing');
@@ -41,20 +42,16 @@ export default function LunaApp() {
   };
 
   const resetTimer = () => {
-    if (currentView === 'landing') return; // На главной таймер не нужен
-    
+    if (currentView === 'landing') return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(logout, INACTIVITY_LIMIT);
   };
 
   useEffect(() => {
-    // Если мы не на главной, следим за активностью
     if (currentView !== 'landing') {
       const events = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
       events.forEach(event => window.addEventListener(event, resetTimer));
-      
-      resetTimer(); // Запуск при входе
-
+      resetTimer();
       return () => {
         events.forEach(event => window.removeEventListener(event, resetTimer));
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -62,21 +59,17 @@ export default function LunaApp() {
     }
   }, [currentView]);
 
-
-  // --- 2. ЛОГИКА ВХОДА ---
-  
+  // --- 2. ВХОД ---
   useEffect(() => {
     const session = sessionStorage.getItem(SESSION_KEY);
-    if (session === 'active') {
-      setCurrentView('chat');
-    }
+    if (session === 'active') setCurrentView('chat');
   }, []);
 
   const handlePinChange = (value) => {
     if (value.length > 4) return;
     setPin(value);
     setIsError(false);
-    resetTimer(); // Сброс таймера при наборе
+    resetTimer();
 
     if (value.length === 4) {
       if (value === PIN_CODE) {
@@ -89,15 +82,13 @@ export default function LunaApp() {
     }
   };
 
-  const focusInput = () => {
-    inputRef.current?.focus();
-  };
+  const focusInput = () => inputRef.current?.focus();
 
-  // --- 3. ЛОГИКА ЧАТА ---
-
+  // --- 3. ЧАТ И ОНЛАЙН (PRESENCE) ---
   useEffect(() => {
     if (currentView !== 'chat') return;
 
+    // 3.1 Загрузка истории
     const fetchMessages = async () => {
       const { data } = await supabase
         .from('messages')
@@ -107,15 +98,29 @@ export default function LunaApp() {
     };
     fetchMessages();
 
-    const channel = supabase
-      .channel('realtime messages')
+    // 3.2 Подписка на сообщения и ПРИСУТСТВИЕ
+    const channel = supabase.channel('luna_room');
+
+    channel
+      // Слушаем новые сообщения
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         setMessages((prev) => [...prev, payload.new]);
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, () => {
          setMessages([]); 
       })
-      .subscribe();
+      // Слушаем статус "Онлайн"
+      .on('presence', { event: 'sync' }, () => {
+        const newState = channel.presenceState();
+        // Считаем сколько уникальных подключений
+        setOnlineCount(Object.keys(newState).length);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Сообщаем всем: "Я здесь"
+          await channel.track({ online_at: new Date().toISOString() });
+        }
+      });
 
     return () => supabase.removeChannel(channel);
   }, [currentView]);
@@ -127,22 +132,16 @@ export default function LunaApp() {
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
-
     await supabase.from('messages').insert([{ content: newMessage, is_mine: true }]);
     setNewMessage('');
-    resetTimer(); // Сброс таймера при отправке
+    resetTimer();
   };
 
   const clearHistory = async () => {
     resetTimer();
     if (!confirm('LUNA: Удалить воспоминания навсегда?')) return;
     setIsDeleting(true);
-    
-    const { error } = await supabase
-      .from('messages')
-      .delete()
-      .neq('id', 0);
-
+    const { error } = await supabase.from('messages').delete().neq('id', 0);
     if (error) alert('Ошибка удаления');
     setMessages([]);
     setIsDeleting(false);
@@ -151,43 +150,31 @@ export default function LunaApp() {
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!visionPrompt.trim()) return;
-    
     setIsGenerating(true);
     setShowVision(false);
-
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: visionPrompt }),
       });
-
       const data = await response.json();
-
       if (data.imageUrl) {
         await supabase.from('messages').insert([{ 
           content: `Vision: ${visionPrompt}`, 
-          is_mine: true,
-          image_url: data.imageUrl
+          is_mine: true, 
+          image_url: data.imageUrl 
         }]);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsGenerating(false);
-      setVisionPrompt('');
-    }
+    } catch (err) { console.error(err); } 
+    finally { setIsGenerating(false); setVisionPrompt(''); }
   };
 
-  // --- UI КОМПОНЕНТЫ ---
-
+  // --- UI ---
   if (currentView === 'landing') {
     return (
       <div className="flex flex-col h-screen items-center justify-center bg-black text-white font-sans animate-fade-in">
-        <button 
-          onClick={() => setCurrentView('login')}
-          className="group flex flex-col items-center transition-transform active:scale-95 focus:outline-none"
-        >
+        <button onClick={() => setCurrentView('login')} className="group flex flex-col items-center focus:outline-none">
            <div className="w-48 h-48 rounded-full bg-black shadow-[0_0_50px_-10px_rgba(197,160,89,0.3)] border border-[#333] flex items-center justify-center mb-8 group-hover:shadow-[0_0_70px_-5px_rgba(197,160,89,0.5)] transition-all duration-700">
               <div className="w-44 h-44 rounded-full bg-gradient-to-br from-[#222] to-[#000] relative overflow-hidden">
                  <div className="absolute top-8 left-10 w-8 h-8 rounded-full bg-[#1a1a1a] opacity-50"></div>
@@ -195,9 +182,7 @@ export default function LunaApp() {
                  <div className="absolute top-20 right-8 w-4 h-4 rounded-full bg-[#1a1a1a] opacity-60"></div>
               </div>
            </div>
-           <h1 style={{ color: GOLD_COLOR }} className="text-2xl font-bold tracking-[0.5em] opacity-80 group-hover:opacity-100 transition-opacity">
-             LUNA
-           </h1>
+           <h1 style={{ color: GOLD_COLOR }} className="text-2xl font-bold tracking-[0.5em] opacity-80 group-hover:opacity-100 transition-opacity">LUNA</h1>
         </button>
       </div>
     );
@@ -206,27 +191,10 @@ export default function LunaApp() {
   if (currentView === 'login') {
     return (
       <div className="flex flex-col h-screen items-center justify-center bg-black" onClick={focusInput}>
-        <input 
-          ref={inputRef}
-          type="tel"
-          pattern="[0-9]*"
-          maxLength={4}
-          value={pin}
-          onChange={(e) => handlePinChange(e.target.value)}
-          autoComplete="off"
-          className="opacity-0 absolute w-1 h-1"
-          autoFocus
-        />
+        <input ref={inputRef} type="tel" pattern="[0-9]*" maxLength={4} value={pin} onChange={(e) => handlePinChange(e.target.value)} autoComplete="off" className="opacity-0 absolute w-1 h-1" autoFocus />
         <div className="flex gap-6">
           {[0, 1, 2, 3].map((index) => (
-            <div 
-              key={index}
-              style={{ 
-                borderColor: isError ? 'red' : GOLD_COLOR,
-                backgroundColor: pin.length > index ? (isError ? 'red' : GOLD_COLOR) : 'transparent'
-              }}
-              className={`w-4 h-4 rounded-full border-2 transition-all duration-300 ${isError ? 'animate-shake' : ''}`}
-            />
+            <div key={index} style={{ borderColor: isError ? 'red' : GOLD_COLOR, backgroundColor: pin.length > index ? (isError ? 'red' : GOLD_COLOR) : 'transparent' }} className={`w-4 h-4 rounded-full border-2 transition-all duration-300 ${isError ? 'animate-shake' : ''}`} />
           ))}
         </div>
       </div>
@@ -236,35 +204,35 @@ export default function LunaApp() {
   return (
     <div className="flex flex-col h-screen bg-black text-white font-sans relative">
       <header className="p-4 bg-black/90 border-b border-gray-900 flex justify-between items-center sticky top-0 z-10 backdrop-blur">
-        <div className="w-8"></div>
+        
+        {/* ЛЕВЫЙ УГОЛ: Индикатор Онлайн */}
+        <div className="w-8 flex items-center justify-center">
+          {/* Если в комнате больше 1 человека (значит собеседник тут), горит зеленый */}
+          {onlineCount > 1 && (
+            <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_#22c55e] animate-pulse" title="Online"></div>
+          )}
+        </div>
+
         <h1 style={{ color: GOLD_COLOR }} className="text-xl font-bold tracking-[0.3em]">LUNA</h1>
+        
         <div className="flex gap-4 w-8 justify-end">
-          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-900 transition-colors" title="Delete History">🗑️</button>
-          <button onClick={logout} style={{ color: GOLD_COLOR }} className="text-xl hover:opacity-50 transition-opacity font-bold" title="Log Out">✕</button>
+          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-900 transition-colors">🗑️</button>
+          <button onClick={logout} style={{ color: GOLD_COLOR }} className="text-xl hover:opacity-50 transition-opacity font-bold">✕</button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-            <div 
-              style={{ backgroundColor: msg.is_mine ? 'rgba(197, 160, 89, 0.2)' : '#1f2937', borderColor: msg.is_mine ? GOLD_COLOR : 'transparent' }}
-              className={`max-w-[85%] p-3 rounded-2xl border ${msg.is_mine ? 'rounded-br-none' : 'rounded-bl-none text-gray-300'}`}
-            >
+            <div style={{ backgroundColor: msg.is_mine ? 'rgba(197, 160, 89, 0.2)' : '#1f2937', borderColor: msg.is_mine ? GOLD_COLOR : 'transparent' }} className={`max-w-[85%] p-3 rounded-2xl border ${msg.is_mine ? 'rounded-br-none' : 'rounded-bl-none text-gray-300'}`}>
               {msg.image_url && (
                 <div className="mb-3 rounded-lg overflow-hidden border border-gray-800">
                   <img src={msg.image_url} alt="Vision" className="w-full h-auto" />
                 </div>
               )}
               <p className="leading-relaxed text-sm md:text-base">{msg.content}</p>
-              
-              {/* ВРЕМЯ ПО МОСКВЕ */}
               <p className="text-[10px] opacity-40 mt-1 text-right font-mono">
-                {new Date(msg.created_at).toLocaleTimeString('ru-RU', {
-                  hour: '2-digit', 
-                  minute:'2-digit',
-                  timeZone: 'Europe/Moscow' // Принудительно Москва
-                })}
+                {new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute:'2-digit', timeZone: 'Europe/Moscow' })}
               </p>
             </div>
           </div>
@@ -276,13 +244,7 @@ export default function LunaApp() {
       <div className="p-4 bg-black border-t border-gray-900">
         <form onSubmit={sendMessage} className="flex gap-3 max-w-3xl mx-auto items-center">
           <button type="button" onClick={() => { setShowVision(true); resetTimer(); }} className="text-xl opacity-70 hover:opacity-100 transition">👁️</button>
-          <input 
-            type="text" 
-            value={newMessage} 
-            onChange={(e) => { setNewMessage(e.target.value); resetTimer(); }} 
-            placeholder="..." 
-            className="flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700"
-          />
+          <input type="text" value={newMessage} onChange={(e) => { setNewMessage(e.target.value); resetTimer(); }} placeholder="..." className="flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700" />
           <button type="submit" style={{ color: GOLD_COLOR }} className="text-2xl hover:scale-110 transition-transform">➤</button>
         </form>
       </div>
@@ -291,12 +253,7 @@ export default function LunaApp() {
         <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-6">
           <div className="w-full max-w-md bg-[#0a0a0a] p-8 rounded-2xl border border-[#333] shadow-2xl">
             <h2 style={{ color: GOLD_COLOR }} className="mb-6 tracking-[0.2em] text-center text-sm font-bold uppercase">Luna Vision</h2>
-            <textarea 
-              value={visionPrompt} 
-              onChange={(e) => { setVisionPrompt(e.target.value); resetTimer(); }} 
-              placeholder="Describe the dream..." 
-              className="w-full bg-black border border-gray-800 rounded p-4 h-32 mb-6 text-gray-300 outline-none focus:border-[#C5A059] resize-none"
-            />
+            <textarea value={visionPrompt} onChange={(e) => { setVisionPrompt(e.target.value); resetTimer(); }} placeholder="Describe the dream..." className="w-full bg-black border border-gray-800 rounded p-4 h-32 mb-6 text-gray-300 outline-none focus:border-[#C5A059] resize-none" />
             <div className="flex gap-4">
               <button onClick={() => setShowVision(false)} className="flex-1 py-3 text-gray-500 hover:text-white transition">Close</button>
               <button onClick={handleGenerate} style={{ color: GOLD_COLOR, borderColor: GOLD_COLOR }} className="flex-1 py-3 border rounded hover:bg-[#C5A059] hover:text-black transition font-bold uppercase text-xs tracking-widest">Manifest</button>
@@ -306,4 +263,4 @@ export default function LunaApp() {
       )}
     </div>
   );
-                    }
+          }
