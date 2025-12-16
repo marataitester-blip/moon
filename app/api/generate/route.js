@@ -7,19 +7,20 @@ export async function POST(request) {
     
     const seed = Math.floor(Math.random() * 1000000);
     
-    // --- НОВЫЙ СТИЛЬ: СЮЖЕТ, ПОЛНЫЙ РОСТ, КОМПОЗИЦИЯ ---
-    // Мы добавляем ключевые слова:
-    // - "Narrative scene" (повествовательная сцена - для сюжета)
-    // - "full body view or three-quarter view" (полный рост или три четверти)
-    // - "masterful composition" (мастерская композиция)
-    // - "cinematic lighting" (киношный свет)
-    // - "detailed environment conveying plot" (детализированное окружение, раскрывающее сюжет)
-    const finalPrompt = `Narrative scene, full body view or three-quarter view character, masterful composition, cinematic storytelling, dramatic lighting, high fantasy realism, detailed environment conveying plot, expressive pose, masterpiece, 8k, emotional atmosphere: ${prompt}`;
+    // --- НОВЫЙ СТИЛЬ: ЖЕСТКИЙ РЕАЛИЗМ И ТОЧНОСТЬ ---
+    // Мы убираем фэнтези и киношность.
+    // Ключевые слова:
+    // - "Raw photograph" (сырая фотография, без фильтров)
+    // - "gritty realism" (суровый/зернистый реализм)
+    // - "natural light" (естественный свет)
+    // - "documentary style" (документальный стиль, фиксация реальности)
+    // - "STRICTLY accurate to description" (СТРОГО точно по описанию - это приказ нейросети не выдумывать)
+    const finalPrompt = `Raw photograph, gritty realism, natural light, documentary style, highly detailed, sharp focus, 8k, STRICTLY accurate to description: ${prompt}`;
     
     // Используем Pollinations (модель Flux)
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
 
-    console.log("Генерация (Сюжет и композиция):", imageUrl);
+    console.log("Генерация (Жесткий реализм):", imageUrl);
 
     return NextResponse.json({ imageUrl });
 
