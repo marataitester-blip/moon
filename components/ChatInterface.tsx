@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Send, Sparkles, Loader2 } from 'lucide-react';
 
-// Инициализируем клиент прямо здесь, чтобы избежать путаницы с типами
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -12,18 +11,13 @@ const supabase = createClient(
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<any[]>([]);
-  
-  // Разделяем состояния для двух разных полей ввода
   const [newMessage, setNewMessage] = useState('');
   const [newImagePrompt, setNewImagePrompt] = useState('');
-  
-  // Разделяем индикаторы загрузки, чтобы крутилась нужная кнопка
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Подписка на новые сообщения
   useEffect(() => {
     const fetchMessages = async () => {
       const { data } = await supabase
@@ -47,12 +41,10 @@ export default function ChatInterface() {
     };
   }, []);
 
-  // Автопрокрутка вниз
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Функция для отправки обычного текста
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
@@ -78,7 +70,6 @@ export default function ChatInterface() {
     }
   };
 
-  // Функция для отправки запроса на картинку
   const handleSendImage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newImagePrompt.trim()) return;
@@ -88,7 +79,6 @@ export default function ChatInterface() {
     setIsImageLoading(true);
 
     try {
-      // 1. Отправляем запрос пользователя в чат (чтобы видеть, что просили)
       await supabase.from('messages').insert([
         {
           content: `🎨 Запрос: ${userPrompt}`,
@@ -99,7 +89,6 @@ export default function ChatInterface() {
         }
       ] as any); 
 
-      // 2. Формируем запрос с твоими стилями
       const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
       const fullPrompt = `${userPrompt}, ${styleTags}`;
       const encodedPrompt = encodeURIComponent(fullPrompt);
@@ -107,10 +96,9 @@ export default function ChatInterface() {
       
       const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${randomSeed}`;
 
-      // 3. Отправляем результат (картинку) от имени системы
       await supabase.from('messages').insert([
         {
-          content: '', // Текст не нужен, показываем только картинку
+          content: '', 
           is_mine: false,
           sender: 'system',
           type: 'image',
@@ -127,8 +115,10 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="flex flex-col h-[90vh] max-w-md mx-auto bg-black text-[#D4AF37] border border-[#1F1F1F] rounded-2xl overflow-hidden shadow-2xl">
-      {/* Заголовок */}
+    // Изменили корневой div: теперь h-[100dvh] (100% экрана на мобилке), 
+    // рамки и закругления работают только на компьютерах (sm:border, sm:rounded-2xl)
+    <div className="flex flex-col h-[100dvh] w-full sm:h-[90vh] sm:max-w-md mx-auto bg-black text-[#D4AF37] sm:border sm:border-[#1F1F1F] sm:rounded-2xl overflow-hidden shadow-2xl">
+      
       <div className="p-4 border-b border-[#1F1F1F] bg-[#050505] text-center shrink-0">
         <h2 className="font-serif text-xl tracking-widest text-[#D4AF37] drop-shadow-[0_0_8px_rgba(212,175,55,0.3)]">
           LUNA
@@ -136,7 +126,6 @@ export default function ChatInterface() {
         <p className="text-xs text-gray-500 uppercase tracking-widest">Secure Uplink</p>
       </div>
 
-      {/* Окно сообщений */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-black to-[#050505]">
         {messages.map((msg, index) => (
           <div
@@ -165,42 +154,38 @@ export default function ChatInterface() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Панель ввода с двумя отдельными формами */}
-      <div className="p-4 bg-[#050505] border-t border-[#1F1F1F] flex flex-col gap-3 shrink-0">
+      {/* Панель ввода с добавленным appearance-none для защиты от белого стиля Apple */}
+      <div className="p-4 bg-[#050505] border-t border-[#1F1F1F] flex flex-col gap-3 shrink-0 pb-safe">
         
-        {/* Форма 1: Обычный текст */}
         <form onSubmit={handleSendText} className="flex gap-2">
           <input
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Введите сообщение..."
-            className="flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
+            className="appearance-none flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
           />
           <button
             type="submit"
             disabled={isTextLoading}
-            // Кнопка отправки текста сделана чуть темнее, чтобы выделить золотую кнопку картинок
-            className="bg-[#1a1a1a] border border-[#333] hover:border-[#D4AF37] text-[#D4AF37] p-3 rounded-lg transition-all disabled:opacity-50 flex items-center justify-center"
+            className="appearance-none bg-[#1a1a1a] border border-[#333] hover:border-[#D4AF37] text-[#D4AF37] p-3 rounded-lg transition-all disabled:opacity-50 flex items-center justify-center"
           >
             {isTextLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Send className="w-5 h-5" />}
           </button>
         </form>
 
-        {/* Форма 2: Генерация картинок */}
         <form onSubmit={handleSendImage} className="flex gap-2">
           <input
             type="text"
             value={newImagePrompt}
             onChange={(e) => setNewImagePrompt(e.target.value)}
             placeholder="Что нарисовать? (опишите сцену)..."
-            className="flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
+            className="appearance-none flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
           />
           <button
             type="submit"
             disabled={isImageLoading}
-            // Кнопка картинок залита золотым цветом
-            className="bg-[#D4AF37] text-black p-3 rounded-lg hover:bg-[#b5952f] transition-all disabled:opacity-50 flex items-center justify-center"
+            className="appearance-none bg-[#D4AF37] text-black p-3 rounded-lg hover:bg-[#b5952f] transition-all disabled:opacity-50 flex items-center justify-center"
           >
             {isImageLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
           </button>
