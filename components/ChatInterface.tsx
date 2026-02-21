@@ -20,10 +20,12 @@ export default function ChatInterface() {
 
   useEffect(() => {
     const fetchMessages = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true });
+        
+      if (error) console.error("Ошибка загрузки сообщений:", error);
       if (data) setMessages(data);
     };
 
@@ -54,17 +56,17 @@ export default function ChatInterface() {
     setIsTextLoading(true);
 
     try {
-      await supabase.from('messages').insert([
-        {
-          content: messageText,
-          is_mine: true, // Наш текст - всегда true (справа)
-          sender: 'user',
-          type: 'text',
-          is_generated: false
-        }
-      ] as any); 
+      // Строго только те колонки, что есть в БД
+      const { error } = await supabase.from('messages').insert([{
+        content: messageText,
+        is_mine: true
+      }]); 
+      
+      if (error) {
+        console.error('СУПЕР-ОШИБКА БАЗЫ (Текст):', error);
+      }
     } catch (error) {
-      console.error('Error sending text:', error);
+      console.error('Сетевая ошибка:', error);
     } finally {
       setIsTextLoading(false);
     }
@@ -79,44 +81,35 @@ export default function ChatInterface() {
     setIsImageLoading(true);
 
     try {
-      // 1. Сначала показываем сам запрос в чате (справа)
-      await supabase.from('messages').insert([
-        {
-          content: `🎨 Запрос: ${userPrompt}`,
-          is_mine: true,
-          sender: 'user',
-          type: 'text',
-          is_generated: false
-        }
-      ] as any); 
+      // 1. Отправляем текст запроса в базу
+      const { error: err1 } = await supabase.from('messages').insert([{
+        content: `🎨 Запрос: ${userPrompt}`,
+        is_mine: true
+      }]); 
+      if (err1) console.error('СУПЕР-ОШИБКА БАЗЫ (Пропмт):', err1);
 
-      // 2. Обращаемся к твоему API файлу (route.js)
+      // 2. Идем за картинкой
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: userPrompt })
       });
 
-      if (!response.ok) throw new Error('Network response was not ok');
-      
+      if (!response.ok) throw new Error('Ошибка связи с сервером генерации');
       const data = await response.json();
       
       if (data.imageUrl) {
-        // 3. Сохраняем картинку в базу принудительно как ЧУЖОЕ сообщение (слева)
-        await supabase.from('messages').insert([
-          {
-            content: '', 
-            is_mine: false, // ВАЖНО: именно это ставит картинку влево
-            sender: 'system',
-            type: 'image',
-            image_url: data.imageUrl,
-            is_generated: true
-          }
-        ] as any);
+        // 3. Отправляем картинку как чужое сообщение (влево)
+        const { error: err2 } = await supabase.from('messages').insert([{
+          content: '', 
+          is_mine: false,
+          image_url: data.imageUrl
+        }]);
+        if (err2) console.error('СУПЕР-ОШИБКА БАЗЫ (Картинка):', err2);
       }
       
     } catch (error) {
-      console.error('Error sending image request:', error);
+      console.error('Ошибка процесса генерации:', error);
     } finally {
       setIsImageLoading(false);
     }
@@ -124,7 +117,6 @@ export default function ChatInterface() {
 
   return (
     <div className="flex flex-col h-[100dvh] w-full sm:h-[90vh] sm:max-w-md mx-auto bg-black text-[#D4AF37] sm:border sm:border-[#1F1F1F] sm:rounded-2xl overflow-hidden shadow-2xl">
-      
       <div className="p-4 border-b border-[#1F1F1F] bg-[#050505] text-center shrink-0">
         <h2 className="font-serif text-xl tracking-widest text-[#D4AF37] drop-shadow-[0_0_8px_rgba(212,175,55,0.3)]">
           LUNA
@@ -134,21 +126,16 @@ export default function ChatInterface() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-black to-[#050505]">
         {messages.map((msg, index) => (
-          <div
-            key={msg.id || index}
-            className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[80%] p-3 rounded-lg text-sm border ${
-                msg.is_mine
-                  ? 'bg-[#1a1a1a] border-[#D4AF37] text-[#D4AF37] shadow-[0_0_10px_rgba(212,175,55,0.1)]'
-                  : 'bg-[#0a0a0a] border-[#333] text-gray-300'
-              }`}
-            >
+          <div key={msg.id || index} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[80%] p-3 rounded-lg text-sm border ${
+              msg.is_mine
+                ? 'bg-[#1a1a1a] border-[#D4AF37] text-[#D4AF37] shadow-[0_0_10px_rgba(212,175,55,0.1)]'
+                : 'bg-[#0a0a0a] border-[#333] text-gray-300'
+            }`}>
               {msg.image_url && (
                 <img 
                   src={msg.image_url} 
-                  alt="Generated content" 
+                  alt="Generated" 
                   className="rounded-md border border-[#D4AF37] w-full object-cover" 
                   style={{ marginBottom: msg.content ? '8px' : '0' }}
                 />
@@ -161,7 +148,6 @@ export default function ChatInterface() {
       </div>
 
       <div className="p-4 bg-[#050505] border-t border-[#1F1F1F] flex flex-col gap-3 shrink-0 pb-safe">
-        
         <form onSubmit={handleSendText} className="flex gap-2">
           <input
             type="text"
@@ -170,11 +156,7 @@ export default function ChatInterface() {
             placeholder="Введите сообщение..."
             className="appearance-none flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
           />
-          <button
-            type="submit"
-            disabled={isTextLoading}
-            className="appearance-none bg-[#1a1a1a] border border-[#333] hover:border-[#D4AF37] text-[#D4AF37] p-3 rounded-lg transition-all disabled:opacity-50 flex items-center justify-center"
-          >
+          <button type="submit" disabled={isTextLoading} className="appearance-none bg-[#1a1a1a] border border-[#333] hover:border-[#D4AF37] text-[#D4AF37] p-3 rounded-lg transition-all disabled:opacity-50 flex items-center justify-center">
             {isTextLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Send className="w-5 h-5" />}
           </button>
         </form>
@@ -187,15 +169,10 @@ export default function ChatInterface() {
             placeholder="Что нарисовать? (опишите сцену)..."
             className="appearance-none flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
           />
-          <button
-            type="submit"
-            disabled={isImageLoading}
-            className="appearance-none bg-[#D4AF37] text-black p-3 rounded-lg hover:bg-[#b5952f] transition-all disabled:opacity-50 flex items-center justify-center"
-          >
+          <button type="submit" disabled={isImageLoading} className="appearance-none bg-[#D4AF37] text-black p-3 rounded-lg hover:bg-[#b5952f] transition-all disabled:opacity-50 flex items-center justify-center">
             {isImageLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
           </button>
         </form>
-        
       </div>
     </div>
   );
