@@ -57,7 +57,7 @@ export default function ChatInterface() {
       await supabase.from('messages').insert([
         {
           content: messageText,
-          is_mine: true,
+          is_mine: true, // Наш текст - всегда true (справа)
           sender: 'user',
           type: 'text',
           is_generated: false
@@ -79,6 +79,7 @@ export default function ChatInterface() {
     setIsImageLoading(true);
 
     try {
+      // 1. Сначала показываем сам запрос в чате (справа)
       await supabase.from('messages').insert([
         {
           content: `🎨 Запрос: ${userPrompt}`,
@@ -89,23 +90,30 @@ export default function ChatInterface() {
         }
       ] as any); 
 
-      const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
-      const fullPrompt = `${userPrompt}, ${styleTags}`;
-      const encodedPrompt = encodeURIComponent(fullPrompt);
-      const randomSeed = Math.floor(Math.random() * 1000000);
-      
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${randomSeed}`;
+      // 2. Обращаемся к твоему API файлу (route.js)
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: userPrompt })
+      });
 
-      await supabase.from('messages').insert([
-        {
-          content: '', 
-          is_mine: false,
-          sender: 'system',
-          type: 'image',
-          image_url: imageUrl,
-          is_generated: true
-        }
-      ] as any);
+      if (!response.ok) throw new Error('Network response was not ok');
+      
+      const data = await response.json();
+      
+      if (data.imageUrl) {
+        // 3. Сохраняем картинку в базу принудительно как ЧУЖОЕ сообщение (слева)
+        await supabase.from('messages').insert([
+          {
+            content: '', 
+            is_mine: false, // ВАЖНО: именно это ставит картинку влево
+            sender: 'system',
+            type: 'image',
+            image_url: data.imageUrl,
+            is_generated: true
+          }
+        ] as any);
+      }
       
     } catch (error) {
       console.error('Error sending image request:', error);
@@ -115,8 +123,6 @@ export default function ChatInterface() {
   };
 
   return (
-    // Изменили корневой div: теперь h-[100dvh] (100% экрана на мобилке), 
-    // рамки и закругления работают только на компьютерах (sm:border, sm:rounded-2xl)
     <div className="flex flex-col h-[100dvh] w-full sm:h-[90vh] sm:max-w-md mx-auto bg-black text-[#D4AF37] sm:border sm:border-[#1F1F1F] sm:rounded-2xl overflow-hidden shadow-2xl">
       
       <div className="p-4 border-b border-[#1F1F1F] bg-[#050505] text-center shrink-0">
@@ -154,7 +160,6 @@ export default function ChatInterface() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Панель ввода с добавленным appearance-none для защиты от белого стиля Apple */}
       <div className="p-4 bg-[#050505] border-t border-[#1F1F1F] flex flex-col gap-3 shrink-0 pb-safe">
         
         <form onSubmit={handleSendText} className="flex gap-2">
