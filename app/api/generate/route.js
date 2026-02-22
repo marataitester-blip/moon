@@ -15,12 +15,12 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Ключ OpenAI не настроен' }, { status: 500 });
     }
 
-    // Ограничиваем длину и добавляем стили. DALL-E 3 отлично понимает детали.
+    // Ограничиваем длину (DALL-E 2 отлично работает с короткими и средними запросами)
     const safePrompt = prompt.substring(0, 800);
-    const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
+    const styleTags = "soft realism, aesthetic, beautiful, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    console.log("Отправляем запрос к OpenAI (DALL-E 3)...");
+    console.log("Отправляем запрос к OpenAI (DALL-E 2, эконом-режим)...");
 
     // Обращаемся к API OpenAI
     const response = await fetch(
@@ -32,10 +32,10 @@ export async function POST(request) {
         },
         method: "POST",
         body: JSON.stringify({
-          model: "dall-e-3",
+          model: "dall-e-2",
           prompt: finalPrompt,
           n: 1,
-          size: "1024x1024",
+          size: "512x512", // Уменьшенный размер для максимальной экономии
           response_format: "b64_json"
         }),
       }
@@ -47,11 +47,11 @@ export async function POST(request) {
       throw new Error(`Ошибка сервера OpenAI: ${data.error?.message || response.status}`);
     }
 
-    // OpenAI сразу отдает готовую картинку в Base64
+    // OpenAI сразу отдает готовую картинку в Base64 (в формате PNG)
     const base64Image = data.data[0].b64_json;
     
-    // Формируем формат, который сразу поймет тег <img> в чате
-    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
+    // ИСПРАВЛЕНИЕ: ставим правильный формат (png), чтобы картинка отображалась в чате!
+    const imageUrl = `data:image/png;base64,${base64Image}`;
 
     return NextResponse.json({ imageUrl });
 
