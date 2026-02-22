@@ -8,9 +8,11 @@ export async function POST(request) {
     const { prompt } = body;
     
     const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: 'Ключ не найден' }, { status: 500 });
+    if (!apiKey) return NextResponse.json({ error: 'Ключ OPENROUTER_API_KEY не найден в Vercel' }, { status: 500 });
 
-    console.log("Запрос к Nano Banana...");
+    const finalPrompt = `${prompt}, soft realism, cinematic lighting, masterpiece, 8k resolution`;
+
+    console.log("Запрос к OpenRouter (FLUX.1-schnell)...");
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -19,36 +21,27 @@ export async function POST(request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        // Используем точный ID модели из твоего списка
-        model: "google/gemini-2.5-flash-lite-preview-02-05:free",
+        model: "black-forest-labs/flux-1-schnell",
         messages: [
-          { 
-            role: "user", 
-            content: [
-              { type: "text", text: `Generate a high-quality image: ${prompt}` }
-            ]
-          }
+          { role: "user", content: finalPrompt }
         ]
       })
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error('Ошибка OpenRouter');
+    if (!response.ok) throw new Error(data.error?.message || 'Ошибка OpenRouter');
 
-    // Nano Banana через OpenRouter часто отдает URL на готовую картинку
-    // или base64. Этот код подхватит оба варианта.
-    const output = data.choices[0].message.content.trim();
-    
-    let imageUrl = output;
-    // Если это чистый base64 (без http), добавим префикс
-    if (!output.startsWith('http') && !output.startsWith('data:')) {
-      imageUrl = `data:image/png;base64,${output.replace(/[^A-Za-z0-9+/=]/g, "")}`;
-    }
+    // FLUX через OpenRouter обычно отдает ссылку в контенте или в поле image_url
+    let imageUrl = data.choices[0].message.content.trim();
+
+    // Если модель вдруг прислала текст с Markdown-ссылкой ![alt](url), вытаскиваем только URL
+    const urlMatch = imageUrl.match(/\((https?:\/\/[^\)]+)\)/);
+    if (urlMatch) imageUrl = urlMatch[1];
 
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
-    console.error('Ошибка:', error);
+    console.error('Критическая ошибка:', error);
     return NextResponse.json({ error: 'Ошибка генерации' }, { status: 500 });
   }
 }
