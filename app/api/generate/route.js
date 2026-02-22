@@ -19,7 +19,7 @@ export async function POST(request) {
     // --- МАГИЯ СТИЛЯ ЗДЕСЬ ---
     // Мы добавляем эти теги к любому твоему запросу, чтобы получить нужную атмосферу.
     // Можно менять этот список, чтобы корректировать стиль.
-    const styleModifiers = "magical realism, 16+";
+    const styleModifiers = "ретрофутуризм, эротика 16+";
     
     // Собираем итоговый промпт: запрос пользователя + стиль
     const finalPrompt = `${prompt}. Style: ${styleModifiers}`;
