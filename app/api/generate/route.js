@@ -20,11 +20,11 @@ export async function POST(request) {
     const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    console.log("Отправляем запрос к Hugging Face (SDXL)...");
+    console.log("Отправляем запрос к Hugging Face (FLUX)...");
 
-    // Обращаемся к надежной модели Stable Diffusion XL
+    // Обращаемся к современной и надежной модели FLUX.1-schnell
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+      "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
       {
         headers: {
           "Authorization": `Bearer ${hfKey}`,
