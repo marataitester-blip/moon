@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+// Увеличиваем лимит времени до 60 секунд для Vercel
 export const maxDuration = 60; 
 
 export async function POST(request) {
@@ -18,7 +19,7 @@ export async function POST(request) {
     const styleTags = "soft realism, aesthetic, beautiful, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    console.log("Отправляем запрос к OpenRouter (модель Google Nano Banana)...");
+    console.log("Отправляем запрос к OpenRouter (модель gpt-5-mini)...");
 
     // Обращаемся к API OpenRouter
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -28,8 +29,8 @@ export async function POST(request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        // Используем бесплатную модель из твоего списка
-        model: "google/gemini-2.5-flash-lite-preview-02-05:free",
+        // ИСПОЛЬЗУЕМ ТОЧНЫЙ ID ИЗ ТВОЕГО СПИСКА
+        model: "openai/gpt-5-mini",
         messages: [
           { role: "system", content: "You are an image generator. Reply ONLY with a base64 encoded image string, no text." },
           { role: "user", content: finalPrompt }
