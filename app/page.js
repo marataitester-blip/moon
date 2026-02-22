@@ -24,7 +24,7 @@ export default function LunaApp() {
   
   const [onlineCount, setOnlineCount] = useState(0);
 
-  const [showVision, setShowVision] = useState(false);
+  // Состояния для генерации
   const [visionPrompt, setVisionPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -122,12 +122,16 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Отправка обычного текста
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
-    await supabase.from('messages').insert([{ content: newMessage, is_mine: true }]);
+    
+    const textToSend = newMessage;
     setNewMessage('');
     resetTimer();
+    
+    await supabase.from('messages').insert([{ content: textToSend, is_mine: true }]);
   };
 
   const clearHistory = async () => {
@@ -140,34 +144,52 @@ export default function LunaApp() {
     setIsDeleting(false);
   };
 
+  // Отправка запроса на картинку
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!visionPrompt.trim()) return;
+    
+    const promptText = visionPrompt;
+    setVisionPrompt('');
     setIsGenerating(true);
-    setShowVision(false);
+    resetTimer();
+
     try {
+      // 1. Отправляем сам запрос в чат (чтобы было видно, что просили)
+      await supabase.from('messages').insert([{ 
+        content: `✨ Vision: ${promptText}`, 
+        is_mine: true 
+      }]);
+
+      // 2. Делаем запрос к твоему route.js
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: visionPrompt }),
+        body: JSON.stringify({ prompt: promptText }),
       });
+      
       const data = await response.json();
+      
+      // 3. Записываем картинку в базу как ВХОДЯЩЕЕ сообщение (is_mine: false)
       if (data.imageUrl) {
         await supabase.from('messages').insert([{ 
-          content: `Vision: ${visionPrompt}`, 
-          is_mine: true, 
+          content: '', 
+          is_mine: false, 
           image_url: data.imageUrl 
         }]);
       }
-    } catch (err) { console.error(err); } 
-    finally { setIsGenerating(false); setVisionPrompt(''); }
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      setIsGenerating(false); 
+    }
   };
 
   // --- UI ---
   if (currentView === 'landing') {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-black text-white font-sans animate-fade-in">
-        <button onClick={() => setCurrentView('login')} className="group flex flex-col items-center focus:outline-none">
+      <div className="flex flex-col h-[100dvh] items-center justify-center bg-black text-white font-sans animate-fade-in">
+        <button onClick={() => setCurrentView('login')} className="group flex flex-col items-center focus:outline-none appearance-none">
            <div className="w-48 h-48 rounded-full bg-black shadow-[0_0_50px_-10px_rgba(197,160,89,0.3)] border border-[#333] flex items-center justify-center mb-8 group-hover:shadow-[0_0_70px_-5px_rgba(197,160,89,0.5)] transition-all duration-700">
               <div className="w-44 h-44 rounded-full bg-gradient-to-br from-[#222] to-[#000] relative overflow-hidden">
                  <div className="absolute top-8 left-10 w-8 h-8 rounded-full bg-[#1a1a1a] opacity-50"></div>
@@ -175,7 +197,7 @@ export default function LunaApp() {
                  <div className="absolute top-20 right-8 w-4 h-4 rounded-full bg-[#1a1a1a] opacity-60"></div>
               </div>
            </div>
-           <h1 style={{ color: GOLD_COLOR }} className="text-2xl font-bold tracking-[0.5em] opacity-80 group-hover:opacity-100 transition-opacity">LUNA</h1>
+           <h1 style={{ color: GOLD_COLOR }} className="text-2xl font-bold tracking-[0.5em] opacity-80 group-hover:opacity-100 transition-opacity">Л У Н А</h1>
         </button>
       </div>
     );
@@ -183,7 +205,7 @@ export default function LunaApp() {
 
   if (currentView === 'login') {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-black" onClick={focusInput}>
+      <div className="flex flex-col h-[100dvh] items-center justify-center bg-black" onClick={focusInput}>
         <input ref={inputRef} type="tel" pattern="[0-9]*" maxLength={4} value={pin} onChange={(e) => handlePinChange(e.target.value)} autoComplete="off" className="opacity-0 absolute w-1 h-1" autoFocus />
         <div className="flex gap-6">
           {[0, 1, 2, 3].map((index) => (
@@ -195,8 +217,8 @@ export default function LunaApp() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white font-sans relative">
-      <header className="p-4 bg-black/90 border-b border-gray-900 flex justify-between items-center sticky top-0 z-10 backdrop-blur">
+    <div className="flex flex-col h-[100dvh] bg-black text-white font-sans relative">
+      <header className="p-4 bg-black/90 border-b border-gray-900 flex justify-between items-center sticky top-0 z-10 backdrop-blur shrink-0">
         <div className="w-8 flex items-center justify-center">
           {onlineCount > 1 && (
             <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_#22c55e] animate-pulse"></div>
@@ -204,18 +226,18 @@ export default function LunaApp() {
         </div>
         <h1 style={{ color: GOLD_COLOR }} className="text-xl font-bold tracking-[0.3em]">LUNA</h1>
         <div className="flex gap-4 w-8 justify-end">
-          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-900 transition-colors">🗑️</button>
-          <button onClick={logout} style={{ color: GOLD_COLOR }} className="text-xl hover:opacity-50 transition-opacity font-bold">✕</button>
+          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-900 transition-colors appearance-none">🗑️</button>
+          <button onClick={logout} style={{ color: GOLD_COLOR }} className="text-xl hover:opacity-50 transition-opacity font-bold appearance-none">✕</button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
+          <div key={msg.id || Math.random()} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
             <div 
               style={{ 
                 // ВАШИ СООБЩЕНИЯ: Золотой оттенок
-                // ЧУЖИЕ СООБЩЕНИЯ: Темно-серый, почти черный с тонкой рамкой
+                // ЧУЖИЕ СООБЩЕНИЯ (вкл. картинки): Темно-серый
                 backgroundColor: msg.is_mine ? 'rgba(197, 160, 89, 0.2)' : '#0f0f0f', 
                 borderColor: msg.is_mine ? GOLD_COLOR : '#333',
                 borderWidth: '1px'
@@ -227,7 +249,7 @@ export default function LunaApp() {
                   <img src={msg.image_url} alt="Vision" className="w-full h-auto" />
                 </div>
               )}
-              <p className="leading-relaxed text-sm md:text-base">{msg.content}</p>
+              {msg.content && <p className="leading-relaxed text-sm md:text-base">{msg.content}</p>}
               <p className="text-[10px] opacity-40 mt-1 text-right font-mono">
                 {new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute:'2-digit', timeZone: 'Europe/Moscow' })}
               </p>
@@ -238,39 +260,38 @@ export default function LunaApp() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 bg-black border-t border-gray-900">
-        <form onSubmit={sendMessage} className="flex gap-3 max-w-3xl mx-auto items-center">
-          <button type="button" onClick={() => { setShowVision(true); resetTimer(); }} className="text-xl opacity-70 hover:opacity-100 transition">👁️</button>
-          {/* УВЕЛИЧЕН ШРИФТ ВВОДА (text-lg) */}
+      {/* Обновленная панель с ДВУМЯ полями ввода */}
+      <div className="p-4 bg-black border-t border-gray-900 flex flex-col gap-3 shrink-0 pb-safe">
+        
+        {/* Поле для текста */}
+        <form onSubmit={sendMessage} className="flex gap-3 max-w-3xl w-full mx-auto items-center">
           <input 
             type="text" 
             value={newMessage} 
             onChange={(e) => { setNewMessage(e.target.value); resetTimer(); }} 
-            placeholder="..." 
-            className="flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700 text-lg"
+            placeholder="Сообщение..." 
+            className="appearance-none flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700 text-lg"
           />
-          <button type="submit" style={{ color: GOLD_COLOR }} className="text-2xl hover:scale-110 transition-transform">➤</button>
+          <button type="submit" disabled={!newMessage.trim()} style={{ color: GOLD_COLOR }} className="appearance-none text-2xl hover:scale-110 transition-transform disabled:opacity-30">
+            ➤
+          </button>
         </form>
-      </div>
 
-      {showVision && (
-        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-6">
-          <div className="w-full max-w-md bg-[#0a0a0a] p-8 rounded-2xl border border-[#333] shadow-2xl">
-            <h2 style={{ color: GOLD_COLOR }} className="mb-6 tracking-[0.2em] text-center text-sm font-bold uppercase">Luna Vision</h2>
-            {/* УВЕЛИЧЕН ШРИФТ ВВОДА VISION */}
-            <textarea 
-              value={visionPrompt} 
-              onChange={(e) => { setVisionPrompt(e.target.value); resetTimer(); }} 
-              placeholder="Describe the dream..." 
-              className="w-full bg-black border border-gray-800 rounded p-4 h-32 mb-6 text-gray-300 outline-none focus:border-[#C5A059] resize-none text-lg"
-            />
-            <div className="flex gap-4">
-              <button onClick={() => setShowVision(false)} className="flex-1 py-3 text-gray-500 hover:text-white transition">Close</button>
-              <button onClick={handleGenerate} style={{ color: GOLD_COLOR, borderColor: GOLD_COLOR }} className="flex-1 py-3 border rounded hover:bg-[#C5A059] hover:text-black transition font-bold uppercase text-xs tracking-widest">Manifest</button>
-            </div>
-          </div>
-        </div>
-      )}
+        {/* Поле для генерации картинок */}
+        <form onSubmit={handleGenerate} className="flex gap-3 max-w-3xl w-full mx-auto items-center">
+          <input 
+            type="text" 
+            value={visionPrompt} 
+            onChange={(e) => { setVisionPrompt(e.target.value); resetTimer(); }} 
+            placeholder="Что нарисовать?..." 
+            className="appearance-none flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700 text-lg"
+          />
+          <button type="submit" disabled={isGenerating || !visionPrompt.trim()} style={{ color: GOLD_COLOR }} className="appearance-none text-2xl hover:scale-110 transition-transform disabled:opacity-30 flex items-center justify-center">
+            {isGenerating ? <span className="animate-spin text-lg inline-block">⏳</span> : '✨'}
+          </button>
+        </form>
+
+      </div>
     </div>
   );
 }
