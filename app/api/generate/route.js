@@ -10,9 +10,7 @@ export async function POST(request) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) return NextResponse.json({ error: 'Ключ не найден' }, { status: 500 });
 
-    const finalPrompt = `${prompt}, soft realism, high quality, digital art`;
-
-    console.log("Запрос к OpenRouter...");
+    console.log("Запрос к Nano Banana...");
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -21,13 +19,15 @@ export async function POST(request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5-mini",
+        // Используем точный ID модели из твоего списка
+        model: "google/gemini-2.5-flash-lite-preview-02-05:free",
         messages: [
           { 
-            role: "system", 
-            content: "You are an image generator. Reply ONLY with the raw base64 string. No markdown, no quotes, no explanations. Just the base64 data." 
-          },
-          { role: "user", content: finalPrompt }
+            role: "user", 
+            content: [
+              { type: "text", text: `Generate a high-quality image: ${prompt}` }
+            ]
+          }
         ]
       })
     });
@@ -35,14 +35,15 @@ export async function POST(request) {
     const data = await response.json();
     if (!response.ok) throw new Error('Ошибка OpenRouter');
 
-    // --- МОМЕНТ ИСТИНЫ: ОЧИСТКА ---
-    let rawContent = data.choices[0].message.content.trim();
+    // Nano Banana через OpenRouter часто отдает URL на готовую картинку
+    // или base64. Этот код подхватит оба варианта.
+    const output = data.choices[0].message.content.trim();
     
-    // Убираем возможные markdown обертки ``` или кавычки
-    const cleanBase64 = rawContent.replace(/```[a-z]*\n?|```|^["']|["']$/g, "").trim();
-    
-    // Формируем финальную строку
-    const imageUrl = `data:image/png;base64,${cleanBase64}`;
+    let imageUrl = output;
+    // Если это чистый base64 (без http), добавим префикс
+    if (!output.startsWith('http') && !output.startsWith('data:')) {
+      imageUrl = `data:image/png;base64,${output.replace(/[^A-Za-z0-9+/=]/g, "")}`;
+    }
 
     return NextResponse.json({ imageUrl });
 
