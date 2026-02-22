@@ -5,27 +5,21 @@ export async function POST(request) {
     const body = await request.json();
     const { prompt } = body;
     
-    // Случайное число
+    // Добавляем те самые стили мягкого реализма
+    const rules = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
+    const finalPrompt = `${prompt}, ${rules}`;
+    
+    // Создаем случайный сид, чтобы картинки не повторялись
     const seed = Math.floor(Math.random() * 1000000);
     
-    // --- ЖЕСТКИЙ РЕЖИМ (ТЕХНИЧЕСКИ ИСПРАВЛЕННЫЙ) ---
-    // Мы пишем инструкцию в одну строку без спецсимволов.
-    // Перевод инструкции: "СТРОГО: Рисуй ТОЧНО то, что описано. Фон и свет только из контекста. Никакой отсебятины."
-    
-    const rules = "STRICT MODE: Render EXACTLY what is described. Background and lighting must derive ONLY from the context of the subject. No random styles.";
-    
-    // Склеиваем
-    const finalPrompt = `${rules} ${prompt}`;
-    
-    // Генерируем ссылку (Pollinations Flux)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
+    // Формируем прямую ссылку (Pollinations работает абсолютно БЕЗ ключей)
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&nologo=true&seed=${seed}`;
 
-    console.log("Генерация:", imageUrl);
-
+    // Отправляем ссылку обратно в чат
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
-    console.error('Ошибка:', error);
+    console.error('Ошибка в API генератора:', error);
     return NextResponse.json({ error: 'Ошибка генерации' }, { status: 500 });
   }
 }
