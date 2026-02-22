@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// Увеличиваем лимит времени до 60 секунд для Vercel
 export const maxDuration = 60; 
 
 export async function POST(request) {
@@ -8,20 +7,13 @@ export async function POST(request) {
     const body = await request.json();
     const { prompt } = body;
     
-    // Ищем ключ от OpenRouter
     const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      console.error('Ключ OPENROUTER_API_KEY не настроен в Vercel');
-      return NextResponse.json({ error: 'Ключ OpenRouter не настроен' }, { status: 500 });
-    }
+    if (!apiKey) return NextResponse.json({ error: 'Ключ не найден' }, { status: 500 });
 
-    const safePrompt = prompt.substring(0, 800);
-    const styleTags = "soft realism, aesthetic, beautiful, highly detailed, soft lighting";
-    const finalPrompt = `${safePrompt}, ${styleTags}`;
+    const finalPrompt = `${prompt}, soft realism, high quality, digital art`;
 
-    console.log("Отправляем запрос к OpenRouter (модель gpt-5-mini)...");
+    console.log("Запрос к OpenRouter...");
 
-    // Обращаемся к API OpenRouter
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -29,31 +21,33 @@ export async function POST(request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        // ИСПОЛЬЗУЕМ ТОЧНЫЙ ID ИЗ ТВОЕГО СПИСКА
         model: "openai/gpt-5-mini",
         messages: [
-          { role: "system", content: "You are an image generator. Reply ONLY with a base64 encoded image string, no text." },
+          { 
+            role: "system", 
+            content: "You are an image generator. Reply ONLY with the raw base64 string. No markdown, no quotes, no explanations. Just the base64 data." 
+          },
           { role: "user", content: finalPrompt }
         ]
       })
     });
 
     const data = await response.json();
+    if (!response.ok) throw new Error('Ошибка OpenRouter');
 
-    if (!response.ok) {
-      throw new Error(`Ошибка сервера OpenRouter: ${data.error?.message || response.status}`);
-    }
-
-    // OpenRouter отдает ответ в тексте, нам нужно вытащить оттуда саму картинку
-    const base64Image = data.choices[0].message.content.trim();
+    // --- МОМЕНТ ИСТИНЫ: ОЧИСТКА ---
+    let rawContent = data.choices[0].message.content.trim();
     
-    // Формируем формат (PNG)
-    const imageUrl = `data:image/png;base64,${base64Image}`;
+    // Убираем возможные markdown обертки ``` или кавычки
+    const cleanBase64 = rawContent.replace(/```[a-z]*\n?|```|^["']|["']$/g, "").trim();
+    
+    // Формируем финальную строку
+    const imageUrl = `data:image/png;base64,${cleanBase64}`;
 
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
-    console.error('Критическая ошибка генератора:', error);
+    console.error('Ошибка:', error);
     return NextResponse.json({ error: 'Ошибка генерации' }, { status: 500 });
   }
 }
