@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// Увеличиваем лимит времени до 60 секунд для Vercel
 export const maxDuration = 60; 
 
 export async function POST(request) {
@@ -8,49 +7,46 @@ export async function POST(request) {
     const body = await request.json();
     const { prompt } = body;
     
-    // Ищем ключ от OpenAI
-    const apiKey = process.env.OPENAI_API_KEY;
+    // Ищем ключ от OpenRouter
+    const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
-      console.error('Ключ OPENAI_API_KEY не настроен в Vercel');
-      return NextResponse.json({ error: 'Ключ OpenAI не настроен' }, { status: 500 });
+      console.error('Ключ OPENROUTER_API_KEY не настроен в Vercel');
+      return NextResponse.json({ error: 'Ключ OpenRouter не настроен' }, { status: 500 });
     }
 
-    // Ограничиваем длину (DALL-E 2 отлично работает с короткими и средними запросами)
     const safePrompt = prompt.substring(0, 800);
     const styleTags = "soft realism, aesthetic, beautiful, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    console.log("Отправляем запрос к OpenAI (DALL-E 2, эконом-режим)...");
+    console.log("Отправляем запрос к OpenRouter (модель Google Nano Banana)...");
 
-    // Обращаемся к API OpenAI
-    const response = await fetch(
-      "https://api.openai.com/v1/images/generations",
-      {
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-        body: JSON.stringify({
-          model: "dall-e-2",
-          prompt: finalPrompt,
-          n: 1,
-          size: "512x512", // Уменьшенный размер для максимальной экономии
-          response_format: "b64_json"
-        }),
-      }
-    );
+    // Обращаемся к API OpenRouter
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        // Используем бесплатную модель из твоего списка
+        model: "google/gemini-2.5-flash-lite-preview-02-05:free",
+        messages: [
+          { role: "system", content: "You are an image generator. Reply ONLY with a base64 encoded image string, no text." },
+          { role: "user", content: finalPrompt }
+        ]
+      })
+    });
 
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(`Ошибка сервера OpenAI: ${data.error?.message || response.status}`);
+      throw new Error(`Ошибка сервера OpenRouter: ${data.error?.message || response.status}`);
     }
 
-    // OpenAI сразу отдает готовую картинку в Base64 (в формате PNG)
-    const base64Image = data.data[0].b64_json;
+    // OpenRouter отдает ответ в тексте, нам нужно вытащить оттуда саму картинку
+    const base64Image = data.choices[0].message.content.trim();
     
-    // ИСПРАВЛЕНИЕ: ставим правильный формат (png), чтобы картинка отображалась в чате!
+    // Формируем формат (PNG)
     const imageUrl = `data:image/png;base64,${base64Image}`;
 
     return NextResponse.json({ imageUrl });
