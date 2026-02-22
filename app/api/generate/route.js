@@ -8,11 +8,11 @@ export async function POST(request) {
     const body = await request.json();
     const { prompt } = body;
     
-    // Проверяем, есть ли ключ
-    const hfKey = process.env.HF_API_KEY;
-    if (!hfKey) {
-      console.error('Ключ HF_API_KEY не настроен в Vercel');
-      return NextResponse.json({ error: 'Ключ не настроен' }, { status: 500 });
+    // Теперь мы ищем ключ от Together AI
+    const apiKey = process.env.TOGETHER_API_KEY;
+    if (!apiKey) {
+      console.error('Ключ TOGETHER_API_KEY не настроен в Vercel');
+      return NextResponse.json({ error: 'Ключ Together AI не настроен' }, { status: 500 });
     }
 
     // Ограничиваем длину и добавляем стили реализма
@@ -20,29 +20,37 @@ export async function POST(request) {
     const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    console.log("Отправляем запрос к Hugging Face (SD v1.5)...");
+    console.log("Отправляем запрос к Together AI (модель FLUX)...");
 
-    // Обращаемся к старой, но самой стабильной на бесплатном тарифе модели
+    // Обращаемся к Together AI
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
+      "https://api.together.xyz/v1/images/generations",
       {
         headers: {
-          "Authorization": `Bearer ${hfKey}`,
+          "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         method: "POST",
-        body: JSON.stringify({ inputs: finalPrompt }),
+        body: JSON.stringify({
+          model: "black-forest-labs/FLUX.1-schnell",
+          prompt: finalPrompt,
+          width: 1024,
+          height: 1024,
+          steps: 4,
+          n: 1,
+          response_format: "b64_json"
+        }),
       }
     );
 
+    const data = await response.json();
+
     if (!response.ok) {
-      throw new Error(`Ошибка сервера HF: ${response.status}`);
+      throw new Error(`Ошибка сервера Together: ${data.error?.message || response.status}`);
     }
 
-    // HF отдает саму картинку файлом (blob). Превращаем её в код (Base64) для базы данных
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const base64Image = buffer.toString('base64');
+    // Together AI по нашему запросу сразу отдает готовый код картинки (Base64)
+    const base64Image = data.data[0].b64_json;
     
     // Формируем формат, который сразу поймет тег <img> в чате
     const imageUrl = `data:image/jpeg;base64,${base64Image}`;
