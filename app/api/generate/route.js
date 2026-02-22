@@ -19,7 +19,7 @@ export async function POST(request) {
     // --- МАГИЯ СТИЛЯ ЗДЕСЬ ---
     // Мы добавляем эти теги к любому твоему запросу, чтобы получить нужную атмосферу.
     // Можно менять этот список, чтобы корректировать стиль.
-    const styleModifiers = "magical realism, dreamlike atmosphere, soft cinematic lighting, highly detailed art, mystical aesthetic, 8k resolution render";
+    const styleModifiers = "magical realism, soft cinematic lighting, highly detailed artr, 16+";
     
     // Собираем итоговый промпт: запрос пользователя + стиль
     const finalPrompt = `${prompt}. Style: ${styleModifiers}`;
