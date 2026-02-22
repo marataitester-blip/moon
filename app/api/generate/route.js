@@ -5,27 +5,49 @@ export async function POST(request) {
     const body = await request.json();
     const { prompt } = body;
     
-    // 1. Жесткая защита от ошибки 1013 (особенно для русского языка)
-    // Оставляем только первые 200 символов от твоего запроса
-    const safePrompt = prompt.substring(0, 200);
-    
-    // 2. Добавляем твои стили
+    // Проверяем, есть ли ключ
+    const hfKey = process.env.HF_API_KEY;
+    if (!hfKey) {
+      console.error('Ключ HF_API_KEY не настроен в Vercel');
+      return NextResponse.json({ error: 'Ключ не настроен' }, { status: 500 });
+    }
+
+    // Ограничиваем длину и добавляем стили реализма
+    const safePrompt = prompt.substring(0, 300);
     const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
-    
-    // 3. Уникальный сид, чтобы картинки всегда были разными
-    const seed = Math.floor(Math.random() * 1000000);
-    
-    // 4. Прямая ссылка на генератор Pollinations (РАБОТАЕТ БЕЗ КЛЮЧЕЙ)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&nologo=true&seed=${seed}`;
 
-    console.log("Сгенерирована ссылка:", imageUrl);
+    console.log("Отправляем запрос к Hugging Face...");
 
-    // 5. Отдаем ссылку обратно в наш чат
+    // Обращаемся напрямую к модели Flux Schnell
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+      {
+        headers: {
+          "Authorization": `Bearer ${hfKey}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        body: JSON.stringify({ inputs: finalPrompt }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Ошибка сервера HF: ${response.status}`);
+    }
+
+    // HF отдает саму картинку файлом (blob). Превращаем её в код (Base64) для базы данных
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64Image = buffer.toString('base64');
+    
+    // Формируем формат, который сразу поймет тег <img> в чате
+    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
+
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
-    console.error('Ошибка в API генератора:', error);
+    console.error('Критическая ошибка генератора:', error);
     return NextResponse.json({ error: 'Ошибка генерации' }, { status: 500 });
   }
 }
