@@ -8,23 +8,23 @@ export async function POST(request) {
     const body = await request.json();
     const { prompt } = body;
     
-    // Теперь мы ищем ключ от Together AI
-    const apiKey = process.env.TOGETHER_API_KEY;
+    // Ищем ключ от OpenAI
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error('Ключ TOGETHER_API_KEY не настроен в Vercel');
-      return NextResponse.json({ error: 'Ключ Together AI не настроен' }, { status: 500 });
+      console.error('Ключ OPENAI_API_KEY не настроен в Vercel');
+      return NextResponse.json({ error: 'Ключ OpenAI не настроен' }, { status: 500 });
     }
 
-    // Ограничиваем длину и добавляем стили реализма
-    const safePrompt = prompt.substring(0, 300);
+    // Ограничиваем длину и добавляем стили. DALL-E 3 отлично понимает детали.
+    const safePrompt = prompt.substring(0, 800);
     const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
     const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    console.log("Отправляем запрос к Together AI (модель FLUX)...");
+    console.log("Отправляем запрос к OpenAI (DALL-E 3)...");
 
-    // Обращаемся к Together AI
+    // Обращаемся к API OpenAI
     const response = await fetch(
-      "https://api.together.xyz/v1/images/generations",
+      "https://api.openai.com/v1/images/generations",
       {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -32,12 +32,10 @@ export async function POST(request) {
         },
         method: "POST",
         body: JSON.stringify({
-          model: "black-forest-labs/FLUX.1-schnell",
+          model: "dall-e-3",
           prompt: finalPrompt,
-          width: 1024,
-          height: 1024,
-          steps: 4,
           n: 1,
+          size: "1024x1024",
           response_format: "b64_json"
         }),
       }
@@ -46,10 +44,10 @@ export async function POST(request) {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(`Ошибка сервера Together: ${data.error?.message || response.status}`);
+      throw new Error(`Ошибка сервера OpenAI: ${data.error?.message || response.status}`);
     }
 
-    // Together AI по нашему запросу сразу отдает готовый код картинки (Base64)
+    // OpenAI сразу отдает готовую картинку в Base64
     const base64Image = data.data[0].b64_json;
     
     // Формируем формат, который сразу поймет тег <img> в чате
