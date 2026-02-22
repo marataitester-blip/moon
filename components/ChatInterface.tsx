@@ -51,23 +51,17 @@ export default function ChatInterface() {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
-    console.log("=== КНОПКА ТЕКСТА НАЖАТА ===", newMessage); // Маячок для консоли
     const messageText = newMessage;
     setNewMessage('');
     setIsTextLoading(true);
 
     try {
-      // Возвращаем as any, чтобы Vercel не блокировал сборку
       const { error } = await supabase.from('messages').insert([{
         content: messageText,
         is_mine: true
       }] as any); 
       
-      if (error) {
-        console.error('СУПЕР-ОШИБКА БАЗЫ (Текст):', error);
-      } else {
-        console.log("Текст успешно ушел в базу!");
-      }
+      if (error) console.error('СУПЕР-ОШИБКА БАЗЫ (Текст):', error);
     } catch (error) {
       console.error('Сетевая ошибка:', error);
     } finally {
@@ -79,20 +73,19 @@ export default function ChatInterface() {
     e.preventDefault();
     if (!newImagePrompt.trim()) return;
 
-    console.log("=== КНОПКА МАГИИ НАЖАТА ===", newImagePrompt); // Маячок для консоли
     const userPrompt = newImagePrompt;
     setNewImagePrompt('');
     setIsImageLoading(true);
 
     try {
+      // 1. Сохраняем запрос пользователя (он будет справа)
       const { error: err1 } = await supabase.from('messages').insert([{
         content: `🎨 Запрос: ${userPrompt}`,
         is_mine: true
       }] as any); 
-      if (err1) console.error('СУПЕР-ОШИБКА БАЗЫ (Пропмт):', err1);
+      if (err1) console.error('Ошибка базы (Пропмт):', err1);
 
-      console.log("Запрос ушел, ждем ответ от генератора...");
-      
+      // 2. Отправляем запрос на генератор
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,15 +94,15 @@ export default function ChatInterface() {
 
       if (!response.ok) throw new Error('Ошибка связи с сервером генерации');
       const data = await response.json();
-      console.log("Получена ссылка на картинку:", data.imageUrl);
       
+      // 3. Сохраняем готовую картинку от бота (она будет слева)
       if (data.imageUrl) {
         const { error: err2 } = await supabase.from('messages').insert([{
           content: '', 
           is_mine: false,
           image_url: data.imageUrl
         }] as any);
-        if (err2) console.error('СУПЕР-ОШИБКА БАЗЫ (Картинка):', err2);
+        if (err2) console.error('Ошибка базы (Картинка):', err2);
       }
       
     } catch (error) {
@@ -129,25 +122,32 @@ export default function ChatInterface() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-black to-[#050505]">
-        {messages.map((msg, index) => (
-          <div key={msg.id || index} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] p-3 rounded-lg text-sm border ${
-              msg.is_mine
-                ? 'bg-[#1a1a1a] border-[#D4AF37] text-[#D4AF37] shadow-[0_0_10px_rgba(212,175,55,0.1)]'
-                : 'bg-[#0a0a0a] border-[#333] text-gray-300'
-            }`}>
-              {msg.image_url && (
-                <img 
-                  src={msg.image_url} 
-                  alt="Generated" 
-                  className="rounded-md border border-[#D4AF37] w-full object-cover" 
-                  style={{ marginBottom: msg.content ? '8px' : '0' }}
-                />
-              )}
-              {msg.content && <p>{msg.content}</p>}
+        {messages.map((msg, index) => {
+          // ИСПРАВЛЕНИЕ: Четкое разделение на свои и чужие
+          const isOwn = msg.is_mine;
+          
+          return (
+            <div key={msg.id || index} className={`flex w-full ${isOwn ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] p-3 rounded-xl text-sm border shadow-lg ${
+                isOwn
+                  ? 'bg-[#1a1a1a] border-[#D4AF37]/50 text-[#D4AF37] rounded-tr-sm'
+                  : 'bg-[#0a0a0a] border-[#333] text-gray-300 rounded-tl-sm'
+              }`}>
+                {msg.image_url && (
+                  <img 
+                    src={msg.image_url} 
+                    alt="Generated" 
+                    className="rounded-lg border border-[#D4AF37]/30 w-full object-cover" 
+                    style={{ marginBottom: msg.content ? '8px' : '0' }}
+                  />
+                )}
+                {msg.content && (
+                  <p className="font-light whitespace-pre-wrap">{msg.content}</p>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
