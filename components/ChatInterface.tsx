@@ -25,7 +25,7 @@ export default function ChatInterface() {
         .select('*')
         .order('created_at', { ascending: true });
         
-      if (error) console.error("Ошибка загрузки сообщений:", error);
+      if (error) console.error("Ошибка загрузки:", error);
       if (data) setMessages(data);
     };
 
@@ -56,14 +56,12 @@ export default function ChatInterface() {
     setIsTextLoading(true);
 
     try {
-      const { error } = await supabase.from('messages').insert([{
+      await supabase.from('messages').insert([{
         content: messageText,
         is_mine: true
       }] as any); 
-      
-      if (error) console.error('СУПЕР-ОШИБКА БАЗЫ (Текст):', error);
     } catch (error) {
-      console.error('Сетевая ошибка:', error);
+      console.error('Ошибка:', error);
     } finally {
       setIsTextLoading(false);
     }
@@ -78,35 +76,30 @@ export default function ChatInterface() {
     setIsImageLoading(true);
 
     try {
-      // 1. Сохраняем запрос пользователя (он будет справа)
-      const { error: err1 } = await supabase.from('messages').insert([{
-        content: `🎨 Запрос: ${userPrompt}`,
+      await supabase.from('messages').insert([{
+        content: `🎨 Видение: ${userPrompt}`,
         is_mine: true
       }] as any); 
-      if (err1) console.error('Ошибка базы (Пропмт):', err1);
 
-      // 2. Отправляем запрос на генератор
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: userPrompt })
       });
 
-      if (!response.ok) throw new Error('Ошибка связи с сервером генерации');
+      if (!response.ok) throw new Error('Ошибка генерации');
       const data = await response.json();
       
-      // 3. Сохраняем готовую картинку от бота (она будет слева)
       if (data.imageUrl) {
-        const { error: err2 } = await supabase.from('messages').insert([{
+        await supabase.from('messages').insert([{
           content: '', 
           is_mine: false,
           image_url: data.imageUrl
         }] as any);
-        if (err2) console.error('Ошибка базы (Картинка):', err2);
       }
       
     } catch (error) {
-      console.error('Ошибка процесса генерации:', error);
+      console.error('Ошибка:', error);
     } finally {
       setIsImageLoading(false);
     }
@@ -121,33 +114,32 @@ export default function ChatInterface() {
         <p className="text-xs text-gray-500 uppercase tracking-widest">Secure Uplink</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-black to-[#050505]">
-        {messages.map((msg, index) => {
-          // ИСПРАВЛЕНИЕ: Четкое разделение на свои и чужие
-          const isOwn = msg.is_mine;
-          
-          return (
-            <div key={msg.id || index} className={`flex w-full ${isOwn ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] p-3 rounded-xl text-sm border shadow-lg ${
-                isOwn
-                  ? 'bg-[#1a1a1a] border-[#D4AF37]/50 text-[#D4AF37] rounded-tr-sm'
-                  : 'bg-[#0a0a0a] border-[#333] text-gray-300 rounded-tl-sm'
-              }`}>
-                {msg.image_url && (
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gradient-to-b from-black to-[#050505]">
+        {messages.map((msg) => (
+          <div key={msg.id} className={`flex w-full ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[85%] p-3 rounded-xl text-sm border shadow-xl transition-all ${
+              msg.is_mine
+                ? 'bg-[#1a1a1a] border-[#D4AF37]/40 text-[#D4AF37] rounded-tr-none'
+                : 'bg-[#0a0a0a] border-[#333] text-gray-300 rounded-tl-none'
+            }`}>
+              {msg.image_url && (
+                <div className="relative min-h-[200px] w-full mb-2">
                   <img 
                     src={msg.image_url} 
                     alt="Generated" 
-                    className="rounded-lg border border-[#D4AF37]/30 w-full object-cover" 
-                    style={{ marginBottom: msg.content ? '8px' : '0' }}
+                    className="rounded-lg border border-[#D4AF37]/20 w-full h-auto block"
+                    style={{ display: 'block', minHeight: '100px' }}
+                    onLoad={(e) => console.log("Картинка загружена успешно")}
+                    onError={(e) => console.error("Ошибка отрисовки картинки")}
                   />
-                )}
-                {msg.content && (
-                  <p className="font-light whitespace-pre-wrap">{msg.content}</p>
-                )}
-              </div>
+                </div>
+              )}
+              {msg.content && (
+                <p className="font-light whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+              )}
             </div>
-          );
-        })}
+          </div>
+        ))}
         <div ref={messagesEndRef} />
       </div>
 
@@ -157,10 +149,10 @@ export default function ChatInterface() {
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Введите сообщение..."
-            className="appearance-none flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
+            placeholder="Сообщение..."
+            className="flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] text-sm"
           />
-          <button type="submit" disabled={isTextLoading} className="appearance-none bg-[#1a1a1a] border border-[#333] hover:border-[#D4AF37] text-[#D4AF37] p-3 rounded-lg transition-all disabled:opacity-50 flex items-center justify-center">
+          <button type="submit" disabled={isTextLoading} className="bg-[#1a1a1a] border border-[#333] text-[#D4AF37] p-3 rounded-lg disabled:opacity-50">
             {isTextLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Send className="w-5 h-5" />}
           </button>
         </form>
@@ -170,10 +162,10 @@ export default function ChatInterface() {
             type="text"
             value={newImagePrompt}
             onChange={(e) => setNewImagePrompt(e.target.value)}
-            placeholder="Что нарисовать? (опишите сцену)..."
-            className="appearance-none flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] transition-colors placeholder-gray-700 font-sans text-sm"
+            placeholder="Опишите видение..."
+            className="flex-1 bg-[#0a0a0a] border border-[#333] text-[#D4AF37] p-3 rounded-lg focus:outline-none focus:border-[#D4AF37] text-sm"
           />
-          <button type="submit" disabled={isImageLoading} className="appearance-none bg-[#D4AF37] text-black p-3 rounded-lg hover:bg-[#b5952f] transition-all disabled:opacity-50 flex items-center justify-center">
+          <button type="submit" disabled={isImageLoading} className="bg-[#D4AF37] text-black p-3 rounded-lg disabled:opacity-50">
             {isImageLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
           </button>
         </form>
