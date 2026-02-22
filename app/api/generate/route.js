@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+// Увеличиваем лимит времени до 60 секунд для Vercel
+export const maxDuration = 60; 
+
 export async function POST(request) {
   try {
     const body = await request.json();
