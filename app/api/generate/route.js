@@ -4,52 +4,50 @@ export const maxDuration = 60;
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const { prompt } = body;
-    
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: 'Ключ OpenAI не настроен' }, { status: 500 });
+    const { prompt } = await request.json();
+    const apiKey = process.env.OPENROUTER_API_KEY; // Используем OpenRouter
 
-    // --- МОДИФИКАЦИЯ СТИЛЯ ---
-    // Убрали "опасные" слова, заменив их на художественные эквиваленты для обхода фильтров
-    const styleModifiers = "cinematic realism, impressionism, lush forest, artistic photography, soft vintage aesthetic, 8k, detailed textures";
-    const finalPrompt = `${prompt}. Style: ${styleModifiers}`;
+    if (!apiKey) return NextResponse.json({ error: 'Ключ не найден' }, { status: 500 });
 
-    console.log(`Генерируем: "${finalPrompt}"`);
+    // --- СТИЛИЗАЦИЯ БЕЗ МАГИИ ---
+    // Вместо имен режиссеров используем описание их стиля: 
+    // теплый свет, пленка 35мм, винтажная эстетика, естественные текстуры.
+    const styleModifiers = "70s vintage cinema style, shot on 35mm film, grainy texture, warm natural lighting, unpolished realism, deep shadows, wide angle lens, highly detailed skin textures";
+    const finalPrompt = `${prompt}, ${styleModifiers}`;
 
-    // 1. Запрос в OpenAI
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
+    console.log("Запрос к FLUX:", finalPrompt);
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "dall-e-2",
-        prompt: finalPrompt,
-        n: 1,
-        size: "512x512"
+        model: "black-forest-labs/flux-1-schnell",
+        messages: [{ role: "user", content: finalPrompt }]
       })
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || 'Ошибка OpenAI');
+    if (!response.ok) throw new Error(data.error?.message || 'Ошибка OpenRouter');
 
-    const tempUrl = data.data[0].url;
+    // Вытаскиваем ссылку из ответа (OpenRouter часто присылает её в markdown)
+    let rawContent = data.choices[0].message.content.trim();
+    const urlMatch = rawContent.match(/\((https?:\/\/[^\)]+)\)/);
+    const tempUrl = urlMatch ? urlMatch[1] : rawContent;
 
-    // --- ФИКС ИСЧЕЗНОВЕНИЯ: СКАЧИВАЕМ КАРТИНКУ В BASE64 ---
-    console.log("Картинка создана, упаковываем для вечного хранения...");
-    
+    // --- СОХРАНЯЕМ НАВЕЧНО ---
+    console.log("Скачиваем шедевр...");
     const imageRes = await fetch(tempUrl);
     const arrayBuffer = await imageRes.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
 
-    // Теперь мы отдаем не временную ссылку, а саму картинку целиком
     return NextResponse.json({ imageUrl: base64Image });
 
   } catch (error) {
     console.error('Ошибка:', error);
-    return NextResponse.json({ error: 'Ошибка генерации или обработки' }, { status: 500 });
+    return NextResponse.json({ error: 'Ошибка генерации' }, { status: 500 });
   }
 }
