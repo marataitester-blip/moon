@@ -5,29 +5,30 @@ export const maxDuration = 60;
 export async function POST(request) {
   try {
     const { prompt } = await request.json();
-    const apiKey = process.env.OPENROUTER_API_KEY;
-
+    
+    // Чистим ключ от лишних пробелов
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) {
-      return NextResponse.json({ error: 'Ключ OpenRouter не найден в настройках Vercel' }, { status: 500 });
+      return NextResponse.json({ error: 'Ключ OPENROUTER_API_KEY не найден в Vercel' }, { status: 500 });
     }
 
-    // Стиль: уходим от "магии" к качественной кино-эстетике
-    const styleModifiers = "high-end cinema style, 35mm film, vintage texture, warm lighting, highly detailed, realistic skin, 8k";
+    // Твоя любимая кино-эстетика без "магии"
+    const styleModifiers = "70s vintage cinema style, shot on 35mm film, grainy texture, warm natural lighting, unpolished realism, deep shadows, wide angle lens, highly detailed textures";
     const finalPrompt = `${prompt}, ${styleModifiers}`;
 
-    console.log("Запрос к OpenRouter...");
+    console.log("Запрос к OpenRouter с правильным ID (flux-schnell)...");
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        // Эти заголовки обязательны для некоторых моделей в OpenRouter
         "HTTP-Referer": "https://vercel.app", 
-        "X-Title": "Luna AI Project"
+        "X-Title": "Luna AI"
       },
       body: JSON.stringify({
-        model: "black-forest-labs/flux-1-schnell",
+        // ИСПРАВЛЕННЫЙ ID МОДЕЛИ
+        model: "black-forest-labs/flux-schnell",
         messages: [{ role: "user", content: finalPrompt }]
       })
     });
@@ -38,22 +39,20 @@ export async function POST(request) {
       console.error('Детальная ошибка OpenRouter:', data);
       return NextResponse.json({ 
         error: 'OpenRouter Error', 
-        details: data.error?.message || 'Unknown error' 
+        details: data.error?.message || 'Check balance or model ID' 
       }, { status: response.status });
     }
 
-    // Извлекаем ссылку на картинку
+    // Вытаскиваем ссылку
     let rawContent = data.choices[0]?.message?.content?.trim() || '';
-    
-    // Если ссылка пришла в скобках (markdown), вырезаем её
     const urlMatch = rawContent.match(/\((https?:\/\/[^\)]+)\)/);
     const imageUrl = urlMatch ? urlMatch[1] : rawContent;
 
     if (!imageUrl.startsWith('http')) {
-      throw new Error('Модель не вернула прямую ссылку на картинку');
+      return NextResponse.json({ error: 'Модель прислала текст вместо ссылки' }, { status: 400 });
     }
 
-    console.log("Ссылка получена успешно:", imageUrl);
+    console.log("Успех! Ссылка получена:", imageUrl);
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
