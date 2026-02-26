@@ -1,24 +1,20 @@
 import { NextResponse } from 'next/server';
 
-export const maxDuration = 60; 
+// Для DALL-E 2 хватит и 30 секунд
+export const maxDuration = 30; 
 
 export async function POST(request) {
   try {
-    const { prompt, quality } = await request.json();
+    const { prompt } = await request.json();
     const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey) return NextResponse.json({ error: 'Ключ не найден' }, { status: 500 });
 
-    // Выбираем модель и параметры в зависимости от выбора пользователя
-    const isPremium = quality === 'premium';
-    const model = isPremium ? "dall-e-3" : "dall-e-2";
-    const size = isPremium ? "1024x1024" : "512x512";
-
-    // Тот самый промпт, который тебе понравился
-    const styleModifiers = "Style: Magic realism. Cinematic shot on 35mm vintage film, heavy grain, muted colors, moody atmosphere, high contrast, 1970s aesthetic, intricate textures, masterpiece, no glossy look, no 3D render feel, natural lighting";
+    // Усиливаем стиль, чтобы DALL-E 2 выдала максимум эстетики
+    const styleModifiers = "70s vintage cinema, 35mm film grain, magic realism, moody lighting, highly detailed, artistic, no plastic look";
     const finalPrompt = `${prompt}. ${styleModifiers}`;
 
-    console.log(`Запрос [${model}]: ${prompt}`);
+    console.log("Запрос к DALL-E 2 (Облегченная версия 512x512)...");
 
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
@@ -27,11 +23,11 @@ export async function POST(request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: model,
+        model: "dall-e-2",
         prompt: finalPrompt,
         n: 1,
-        size: size,
-        response_format: "b64_json" 
+        size: "512x512", // Уменьшили разрешение для скорости
+        response_format: "b64_json" // Оставляем вечное хранение
       })
     });
 
@@ -43,6 +39,8 @@ export async function POST(request) {
     }
 
     const imageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
+    console.log("Легкая картинка готова.");
+
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
