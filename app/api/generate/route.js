@@ -1,50 +1,62 @@
 import { NextResponse } from 'next/server';
 
-// Для DALL-E 2 хватит и 30 секунд
-export const maxDuration = 30; 
+// Увеличиваем лимит времени до 60 секунд для Vercel
+export const maxDuration = 60; 
 
 export async function POST(request) {
   try {
-    const { prompt } = await request.json();
+    const body = await request.json();
+    const { prompt } = body;
+    
+    // Ищем ключ от OpenAI
     const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error('Ключ OPENAI_API_KEY не настроен в Vercel');
+      return NextResponse.json({ error: 'Ключ OpenAI не настроен' }, { status: 500 });
+    }
 
-    if (!apiKey) return NextResponse.json({ error: 'Ключ не найден' }, { status: 500 });
+    // Ограничиваем длину и добавляем стили. DALL-E 3 отлично понимает детали.
+    const safePrompt = prompt.substring(0, 800);
+    const styleTags = "soft realism, aesthetic, beautiful, mild erotica, masterpiece, highly detailed, soft lighting";
+    const finalPrompt = `${safePrompt}, ${styleTags}`;
 
-    // Усиливаем стиль, чтобы DALL-E 2 выдала максимум эстетики
-    const styleModifiers = "70s vintage cinema, 35mm film grain, magic realism, moody lighting, highly detailed, artistic, no plastic look";
-    const finalPrompt = `${prompt}. ${styleModifiers}`;
+    console.log("Отправляем запрос к OpenAI (DALL-E 3)...");
 
-    console.log("Запрос к DALL-E 2 (Облегченная версия 512x512)...");
-
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "dall-e-2",
-        prompt: finalPrompt,
-        n: 1,
-        size: "512x512", // Уменьшили разрешение для скорости
-        response_format: "b64_json" // Оставляем вечное хранение
-      })
-    });
+    // Обращаемся к API OpenAI
+    const response = await fetch(
+      "https://api.openai.com/v1/images/generations",
+      {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        body: JSON.stringify({
+          model: "dall-e-3",
+          prompt: finalPrompt,
+          n: 1,
+          size: "1024x1024",
+          response_format: "b64_json"
+        }),
+      }
+    );
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Ошибка OpenAI:', data.error);
-      return NextResponse.json({ error: data.error?.message }, { status: response.status });
+      throw new Error(`Ошибка сервера OpenAI: ${data.error?.message || response.status}`);
     }
 
-    const imageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
-    console.log("Легкая картинка готова.");
+    // OpenAI сразу отдает готовую картинку в Base64
+    const base64Image = data.data[0].b64_json;
+    
+    // Формируем формат, который сразу поймет тег <img> в чате
+    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
 
     return NextResponse.json({ imageUrl });
 
   } catch (error) {
-    console.error('Сбой:', error);
-    return NextResponse.json({ error: 'Сбой генератора' }, { status: 500 });
+    console.error('Критическая ошибка генератора:', error);
+    return NextResponse.json({ error: 'Ошибка генерации' }, { status: 500 });
   }
 }
