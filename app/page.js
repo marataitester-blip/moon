@@ -1,37 +1,63 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { Send, Sparkles, Loader2, Trash2, X } from 'lucide-react';
 
 // --- НАСТРОЙКИ ---
 const PIN_CODE = '7019';
 const SESSION_KEY = 'luna_session_token'; 
-const INACTIVITY_LIMIT = 3 * 60 * 1000; // 3 минуты
-
+const DEVICE_KEY = 'luna_device_id'; // Для отличия тебя от собеседника
+const INACTIVITY_LIMIT = 3 * 60 * 1000; 
 const GOLD_COLOR = '#C5A059'; 
 
-// Инициализация Supabase
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
+
+// Компонент для плавной загрузки фотографий
+const ImageWithSkeleton = ({ src }) => {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="relative min-h-[200px] w-full bg-[#111] rounded-lg overflow-hidden border border-[#333]">
+      {!loaded && <div className="absolute inset-0 animate-pulse bg-[#1a1a1a]" />}
+      <img 
+        src={src} 
+        alt="Vision" 
+        onLoad={() => setLoaded(true)} 
+        className={`w-full h-auto relative z-10 transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`} 
+      />
+    </div>
+  );
+};
 
 export default function LunaApp() {
   const [currentView, setCurrentView] = useState('landing'); 
   const [pin, setPin] = useState('');
   const [isError, setIsError] = useState(false);
   
+  const [deviceId, setDeviceId] = useState('');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const [visionPrompt, setVisionPrompt] = useState('');
   
   const [onlineCount, setOnlineCount] = useState(0);
-
-  // Состояния для генерации
-  const [visionPrompt, setVisionPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const timerRef = useRef(null);
+
+  // --- ИНИЦИАЛИЗАЦИЯ ИДЕНТИФИКАТОРА УСТРОЙСТВА ---
+  useEffect(() => {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    setDeviceId(id);
+  }, []);
 
   // --- ТАЙМЕР БЕЗОПАСНОСТИ ---
   const logout = () => {
@@ -83,15 +109,12 @@ export default function LunaApp() {
 
   const focusInput = () => inputRef.current?.focus();
 
-  // --- ЧАТ ---
+  // --- ЧАТ (ЛОГИКА И REALTIME) ---
   useEffect(() => {
-    if (currentView !== 'chat') return;
+    if (currentView !== 'chat' || !deviceId) return;
 
     const fetchMessages = async () => {
-      const { data } = await supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: true });
+      const { data } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
       if (data) setMessages(data);
     };
     fetchMessages();
@@ -100,7 +123,11 @@ export default function LunaApp() {
 
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        setMessages((prev) => [...prev, payload.new]);
+        setMessages((prev) => {
+          // Защита от дубликатов (если мы уже добавили это сообщение оптимистично)
+          if (prev.some(m => m.id === payload.new.id)) return prev;
+          return [...prev, payload.new];
+        });
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, () => {
          setMessages([]); 
@@ -115,14 +142,14 @@ export default function LunaApp() {
         }
       });
 
-    return () => supabase.removeChannel(channel);
-  }, [currentView]);
+    return () => { supabase.removeChannel(channel); };
+  }, [currentView, deviceId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Отправка обычного текста
+  // --- ОТПРАВКА СООБЩЕНИЙ (ОПТИМИСТИЧНЫЙ UI) ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
@@ -131,20 +158,31 @@ export default function LunaApp() {
     setNewMessage('');
     resetTimer();
     
-    await supabase.from('messages').insert([{ content: textToSend, is_mine: true }]);
+    // 1. Создаем временный ID и МГНОВЕННО показываем на экране
+    const tempId = crypto.randomUUID();
+    const optimisticMsg = { 
+      id: tempId, 
+      content: textToSend, 
+      sender: deviceId, 
+      is_mine: true, // Оставлено для совместимости со старой БД
+      created_at: new Date().toISOString() 
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    
+    // 2. Фоновая отправка в базу
+    await supabase.from('messages').insert([optimisticMsg]);
   };
 
   const clearHistory = async () => {
     resetTimer();
     if (!confirm('LUNA: Удалить воспоминания навсегда?')) return;
     setIsDeleting(true);
-    const { error } = await supabase.from('messages').delete().neq('id', 0);
+    const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     if (error) alert('Ошибка удаления');
     setMessages([]);
     setIsDeleting(false);
   };
 
-  // Отправка запроса на картинку
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!visionPrompt.trim()) return;
@@ -155,13 +193,18 @@ export default function LunaApp() {
     resetTimer();
 
     try {
-      // 1. Отправляем сам запрос в чат (чтобы было видно, что просили)
-      await supabase.from('messages').insert([{ 
+      // Мгновенное отображение запроса
+      const tempId = crypto.randomUUID();
+      const promptMsg = { 
+        id: tempId, 
         content: `✨ Vision: ${promptText}`, 
-        is_mine: true 
-      }]);
+        sender: deviceId, 
+        is_mine: true,
+        created_at: new Date().toISOString() 
+      };
+      setMessages(prev => [...prev, promptMsg]);
+      await supabase.from('messages').insert([promptMsg]);
 
-      // 2. Делаем запрос к твоему route.js
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -170,12 +213,13 @@ export default function LunaApp() {
       
       const data = await response.json();
       
-      // 3. Записываем картинку в базу как ВХОДЯЩЕЕ сообщение (is_mine: false)
       if (data.imageUrl) {
+        // Ответ ИИ помечается как sender: 'ai'
         await supabase.from('messages').insert([{ 
           content: '', 
-          is_mine: false, 
-          image_url: data.imageUrl 
+          sender: 'ai', 
+          image_url: data.imageUrl,
+          is_mine: false 
         }]);
       }
     } catch (err) { 
@@ -185,7 +229,7 @@ export default function LunaApp() {
     }
   };
 
-  // --- UI ---
+  // --- РЕНДЕР UI ---
   if (currentView === 'landing') {
     return (
       <div className="flex flex-col h-[100dvh] items-center justify-center bg-black text-white font-sans animate-fade-in">
@@ -217,80 +261,88 @@ export default function LunaApp() {
   }
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-black text-white font-sans relative">
-      <header className="p-4 bg-black/90 border-b border-gray-900 flex justify-between items-center sticky top-0 z-10 backdrop-blur shrink-0">
+    <div className="flex flex-col h-[100dvh] bg-black text-white font-sans relative max-w-2xl mx-auto border-x border-[#111]">
+      <header className="p-4 bg-black/95 border-b border-[#1f1f1f] flex justify-between items-center sticky top-0 z-10 backdrop-blur shrink-0">
         <div className="w-8 flex items-center justify-center">
           {onlineCount > 1 && (
             <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_#22c55e] animate-pulse"></div>
           )}
         </div>
-        <h1 style={{ color: GOLD_COLOR }} className="text-xl font-bold tracking-[0.3em]">LUNA</h1>
-        <div className="flex gap-4 w-8 justify-end">
-          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-900 transition-colors appearance-none">🗑️</button>
-          <button onClick={logout} style={{ color: GOLD_COLOR }} className="text-xl hover:opacity-50 transition-opacity font-bold appearance-none">✕</button>
+        <h1 style={{ color: GOLD_COLOR }} className="text-xl font-serif tracking-[0.3em]">LUNA</h1>
+        <div className="flex gap-4 w-12 justify-end">
+          <button onClick={clearHistory} disabled={isDeleting} className="text-gray-600 hover:text-red-900 transition-colors">
+            <Trash2 size={18} />
+          </button>
+          <button onClick={logout} style={{ color: GOLD_COLOR }} className="hover:opacity-50 transition-opacity">
+            <X size={20} />
+          </button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {messages.map((msg) => (
-          <div key={msg.id || Math.random()} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-            <div 
-              style={{ 
-                // ВАШИ СООБЩЕНИЯ: Золотой оттенок
-                // ЧУЖИЕ СООБЩЕНИЯ (вкл. картинки): Темно-серый
-                backgroundColor: msg.is_mine ? 'rgba(197, 160, 89, 0.2)' : '#0f0f0f', 
-                borderColor: msg.is_mine ? GOLD_COLOR : '#333',
-                borderWidth: '1px'
-              }}
-              className={`max-w-[85%] p-3 rounded-2xl border ${msg.is_mine ? 'rounded-br-none' : 'rounded-bl-none text-gray-300'}`}
-            >
-              {msg.image_url && (
-                <div className="mb-3 rounded-lg overflow-hidden border border-gray-800">
-                  <img src={msg.image_url} alt="Vision" className="w-full h-auto" />
-                </div>
-              )}
-              {msg.content && <p className="leading-relaxed text-sm md:text-base">{msg.content}</p>}
-              <p className="text-[10px] opacity-40 mt-1 text-right font-mono">
-                {new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute:'2-digit', timeZone: 'Europe/Moscow' })}
-              </p>
+        {messages.map((msg) => {
+          // Логика визуального разделения: Я, Партнер, ИИ
+          const isMe = msg.sender === deviceId;
+          const isAi = msg.sender === 'ai';
+          const isPartner = !isMe && !isAi;
+
+          return (
+            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+              <div 
+                className={`max-w-[85%] p-3 border transition-all ${
+                  isMe 
+                    ? 'bg-[#1a150b] border-[#C5A059]/50 text-[#e8d4a6] rounded-2xl rounded-tr-none' // Твои
+                    : isAi 
+                      ? 'bg-[#050505] border-[#C5A059]/30 shadow-[0_0_15px_rgba(197,160,89,0.1)] text-white rounded-2xl rounded-tl-none' // ИИ
+                      : 'bg-[#0a0a0a] border-zinc-800 text-zinc-300 rounded-2xl rounded-tl-none' // Партнер
+                }`}
+              >
+                {msg.image_url && <ImageWithSkeleton src={msg.image_url} />}
+                {msg.content && <p className="leading-relaxed text-sm font-light whitespace-pre-wrap">{msg.content}</p>}
+                
+                <p className={`text-[10px] opacity-40 mt-1 font-mono ${isMe ? 'text-right' : 'text-left'}`}>
+                  {new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute:'2-digit', timeZone: 'Europe/Moscow' })}
+                </p>
+              </div>
             </div>
+          );
+        })}
+        {isGenerating && (
+          <div className="flex justify-start">
+             <div className="bg-[#050505] border border-[#C5A059]/30 rounded-2xl rounded-tl-none p-3 shadow-[0_0_15px_rgba(197,160,89,0.1)]">
+                <Loader2 className="animate-spin text-[#C5A059]" size={20} />
+             </div>
           </div>
-        ))}
-        {isGenerating && <div style={{ color: GOLD_COLOR }} className="text-right text-xs animate-pulse">Vision is manifesting...</div>}
+        )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Обновленная панель с ДВУМЯ полями ввода */}
-      <div className="p-4 bg-black border-t border-gray-900 flex flex-col gap-3 shrink-0 pb-safe">
-        
-        {/* Поле для текста */}
-        <form onSubmit={sendMessage} className="flex gap-3 max-w-3xl w-full mx-auto items-center">
+      <div className="p-4 bg-black border-t border-[#1f1f1f] flex flex-col gap-3 pb-safe shrink-0">
+        <form onSubmit={sendMessage} className="flex gap-2 items-center">
           <input 
             type="text" 
             value={newMessage} 
             onChange={(e) => { setNewMessage(e.target.value); resetTimer(); }} 
             placeholder="Сообщение..." 
-            className="appearance-none flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700 text-lg"
+            className="flex-1 bg-[#121212] border border-zinc-800 text-[#D4AF37] px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-[#C5A059]/50 transition-colors"
           />
-          <button type="submit" disabled={!newMessage.trim()} style={{ color: GOLD_COLOR }} className="appearance-none text-2xl hover:scale-110 transition-transform disabled:opacity-30">
-            ➤
+          <button type="submit" disabled={!newMessage.trim()} className="p-3 text-[#D4AF37] hover:scale-105 transition-transform disabled:opacity-30">
+            <Send size={20} />
           </button>
         </form>
 
-        {/* Поле для генерации картинок */}
-        <form onSubmit={handleGenerate} className="flex gap-3 max-w-3xl w-full mx-auto items-center">
+        <form onSubmit={handleGenerate} className="flex gap-2 items-center">
           <input 
             type="text" 
             value={visionPrompt} 
             onChange={(e) => { setVisionPrompt(e.target.value); resetTimer(); }} 
-            placeholder="Что нарисовать?..." 
-            className="appearance-none flex-1 bg-[#111] rounded-full px-5 py-3 outline-none border border-gray-800 focus:border-[#C5A059] text-gray-200 transition-all placeholder-gray-700 text-lg"
+            placeholder="Опишите видение..." 
+            className="flex-1 bg-[#121212] border border-zinc-800 text-[#D4AF37] px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-[#C5A059]/50 transition-colors"
           />
-          <button type="submit" disabled={isGenerating || !visionPrompt.trim()} style={{ color: GOLD_COLOR }} className="appearance-none text-2xl hover:scale-110 transition-transform disabled:opacity-30 flex items-center justify-center">
-            {isGenerating ? <span className="animate-spin text-lg inline-block">⏳</span> : '✨'}
+          <button type="submit" disabled={isGenerating || !visionPrompt.trim()} className="bg-[#1a150b] border border-[#C5A059]/30 text-[#D4AF37] p-3 rounded-xl min-w-[50px] flex items-center justify-center disabled:opacity-50">
+            {isGenerating ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles size={20} />}
           </button>
         </form>
-
       </div>
     </div>
   );
