@@ -58,20 +58,22 @@ export default function LunaApp() {
     setDeviceId(id);
   }, []);
 
+  // Жесткий выход (блокировка)
   const logout = () => {
     sessionStorage.removeItem(SESSION_KEY);
-    setCurrentView('landing');
+    setMessages([]); // Стираем историю из памяти для безопасности
+    setCurrentView('login'); // Сразу кидаем на ПИН-код
     setPin('');
   };
 
   const resetTimer = () => {
-    if (currentView === 'landing') return;
+    if (currentView === 'landing' || currentView === 'login') return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(logout, INACTIVITY_LIMIT);
   };
 
   useEffect(() => {
-    if (currentView !== 'landing') {
+    if (currentView !== 'landing' && currentView !== 'login') {
       const events = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
       events.forEach(event => window.addEventListener(event, resetTimer));
       resetTimer();
@@ -91,12 +93,12 @@ export default function LunaApp() {
     if (value.length > 4) return;
     setPin(value);
     setIsError(false);
-    resetTimer();
-
+    
     if (value.length === 4) {
       if (value === PIN_CODE) {
         sessionStorage.setItem(SESSION_KEY, 'active');
         setCurrentView('chat');
+        resetTimer();
       } else {
         setIsError(true);
         setTimeout(() => setPin(''), 500);
@@ -104,13 +106,26 @@ export default function LunaApp() {
     }
   };
 
+  const focusInput = () => inputRef.current?.focus();
+
   // --- ЧАТ И REALTIME ---
   useEffect(() => {
     if (currentView !== 'chat' || !deviceId) return;
 
     const fetchMessages = async () => {
-      const { data } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
-      if (data) setMessages(data);
+      // ИСПРАВЛЕНИЕ: Берем только последние 50 сообщений, чтобы не обрушить браузер
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+        
+      if (error) {
+        console.error("Ошибка загрузки:", error);
+      } else if (data) {
+        // Переворачиваем массив, чтобы старые были сверху, новые снизу
+        setMessages(data.reverse());
+      }
     };
     fetchMessages();
 
@@ -139,7 +154,7 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- ИСПРАВЛЕННАЯ ОТПРАВКА (Без ID, без TYPE) ---
+  // --- ОТПРАВКА ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
@@ -148,7 +163,6 @@ export default function LunaApp() {
     setNewMessage('');
     resetTimer();
     
-    // Временный ID только для отрисовки на экране
     const tempUiId = crypto.randomUUID();
     const optimisticMsg = { 
       id: tempUiId, 
@@ -159,7 +173,6 @@ export default function LunaApp() {
     };
     setMessages(prev => [...prev, optimisticMsg]);
     
-    // В базу отправляем только то, что есть на скриншоте
     const { error } = await supabase.from('messages').insert([{ 
       content: textToSend, 
       sender: deviceId,
@@ -173,7 +186,6 @@ export default function LunaApp() {
     resetTimer();
     if (!confirm('LUNA: Удалить воспоминания навсегда?')) return;
     setIsDeleting(true);
-    // Так как id это int8, удаляем все записи где id > 0
     const { error } = await supabase.from('messages').delete().gt('id', 0);
     if (error) alert('Ошибка удаления: ' + error.message);
     setMessages([]);
@@ -190,7 +202,6 @@ export default function LunaApp() {
     resetTimer();
 
     try {
-      // 1. Промпт в чат
       const tempUiPromptId = crypto.randomUUID();
       const promptMsg = { 
         id: tempUiPromptId, 
@@ -207,7 +218,6 @@ export default function LunaApp() {
         is_mine: true 
       }]);
 
-      // 2. Запрос картинки
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -216,7 +226,6 @@ export default function LunaApp() {
       
       const data = await response.json();
       
-      // 3. Сохранение картинки от ИИ
       if (data.imageUrl) {
         const tempUiImgId = crypto.randomUUID();
         const imgMsg = {
@@ -244,6 +253,36 @@ export default function LunaApp() {
     }
   };
 
+  if (currentView === 'landing') {
+    return (
+      <div className="flex flex-col h-[100dvh] items-center justify-center bg-black text-white font-sans animate-fade-in">
+        <button onClick={() => setCurrentView('login')} className="group flex flex-col items-center focus:outline-none appearance-none">
+           <div className="w-48 h-48 rounded-full bg-black shadow-[0_0_50px_-10px_rgba(197,160,89,0.3)] border border-[#333] flex items-center justify-center mb-8 group-hover:shadow-[0_0_70px_-5px_rgba(197,160,89,0.5)] transition-all duration-700">
+              <div className="w-44 h-44 rounded-full bg-gradient-to-br from-[#222] to-[#000] relative overflow-hidden">
+                 <div className="absolute top-8 left-10 w-8 h-8 rounded-full bg-[#1a1a1a] opacity-50"></div>
+                 <div className="absolute bottom-12 right-12 w-12 h-12 rounded-full bg-[#1a1a1a] opacity-40"></div>
+                 <div className="absolute top-20 right-8 w-4 h-4 rounded-full bg-[#1a1a1a] opacity-60"></div>
+              </div>
+           </div>
+           <h1 style={{ color: GOLD_COLOR }} className="text-2xl font-bold tracking-[0.5em] opacity-80 group-hover:opacity-100 transition-opacity">Л У Н А</h1>
+        </button>
+      </div>
+    );
+  }
+
+  if (currentView === 'login') {
+    return (
+      <div className="flex flex-col h-[100dvh] items-center justify-center bg-black" onClick={focusInput}>
+        <input ref={inputRef} type="tel" pattern="[0-9]*" maxLength={4} value={pin} onChange={(e) => handlePinChange(e.target.value)} autoComplete="off" className="opacity-0 absolute w-1 h-1" autoFocus />
+        <div className="flex gap-6">
+          {[0, 1, 2, 3].map((index) => (
+            <div key={index} style={{ borderColor: isError ? 'red' : GOLD_COLOR, backgroundColor: pin.length > index ? (isError ? 'red' : GOLD_COLOR) : 'transparent' }} className={`w-4 h-4 rounded-full border-2 transition-all duration-300 ${isError ? 'animate-shake' : ''}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-white font-sans relative max-w-2xl mx-auto border-x border-[#111]">
       <header className="p-4 bg-black/95 border-b border-[#1f1f1f] flex justify-between items-center sticky top-0 z-10 backdrop-blur shrink-0">
@@ -259,7 +298,6 @@ export default function LunaApp() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => {
-          // Обратная совместимость для старых сообщений (где sender = NULL)
           let isMe = false;
           let isAi = false;
           
@@ -321,7 +359,7 @@ export default function LunaApp() {
             type="text" 
             value={visionPrompt} 
             onChange={(e) => { setVisionPrompt(e.target.value); resetTimer(); }} 
-            placeholder="Опишите видение..." 
+            placeholder="Опишите видение (на англ.)..." 
             className="flex-1 bg-[#121212] border border-zinc-800 text-[#D4AF37] px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-[#C5A059]/50 transition-colors"
           />
           <button type="submit" disabled={isGenerating || !visionPrompt.trim()} className="bg-[#1a150b] border border-[#C5A059]/30 text-[#D4AF37] p-3 rounded-xl min-w-[50px] flex items-center justify-center disabled:opacity-50">
