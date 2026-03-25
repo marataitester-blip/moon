@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Send, Sparkles, Loader2, Trash2, X } from 'lucide-react';
 
-// --- НАСТРОЙКИ ---
 const PIN_CODE = '7019';
 const SESSION_KEY = 'luna_session_token'; 
 const DEVICE_KEY = 'luna_device_id'; 
@@ -58,11 +57,10 @@ export default function LunaApp() {
     setDeviceId(id);
   }, []);
 
-  // Жесткий выход (блокировка)
   const logout = () => {
     sessionStorage.removeItem(SESSION_KEY);
-    setMessages([]); // Стираем историю из памяти для безопасности
-    setCurrentView('login'); // Сразу кидаем на ПИН-код
+    setMessages([]); 
+    setCurrentView('login'); 
     setPin('');
   };
 
@@ -106,14 +104,10 @@ export default function LunaApp() {
     }
   };
 
-  const focusInput = () => inputRef.current?.focus();
-
-  // --- ЧАТ И REALTIME ---
   useEffect(() => {
     if (currentView !== 'chat' || !deviceId) return;
 
     const fetchMessages = async () => {
-      // ИСПРАВЛЕНИЕ: Берем только последние 50 сообщений, чтобы не обрушить браузер
       const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -123,7 +117,6 @@ export default function LunaApp() {
       if (error) {
         console.error("Ошибка загрузки:", error);
       } else if (data) {
-        // Переворачиваем массив, чтобы старые были сверху, новые снизу
         setMessages(data.reverse());
       }
     };
@@ -133,7 +126,24 @@ export default function LunaApp() {
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         setMessages((prev) => {
+          // 1. Проверяем точное совпадение ID (на всякий случай)
           if (prev.some(m => m.id === payload.new.id)) return prev;
+          
+          // 2. ИЩЕМ ДУБЛИКАТ (Заменяем временное сообщение от Оптимистичного UI на реальное из базы)
+          const tempMsgIndex = prev.findIndex(m => 
+            typeof m.id === 'string' && // У временных ID буквенный (UUID), у реальных - число
+            m.sender === payload.new.sender && 
+            ((m.content === payload.new.content && !m.image_url) || (m.image_url === payload.new.image_url && m.image_url))
+          );
+
+          if (tempMsgIndex !== -1) {
+            // Если нашли - просто подменяем его, дубликата не будет!
+            const newMessages = [...prev];
+            newMessages[tempMsgIndex] = payload.new;
+            return newMessages;
+          }
+
+          // 3. Если это реально новое сообщение от абонента - добавляем
           return [...prev, payload.new];
         });
       })
@@ -154,7 +164,6 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- ОТПРАВКА ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
