@@ -48,6 +48,9 @@ export default function LunaApp() {
   const inputRef = useRef(null);
   const timerRef = useRef(null);
 
+  // ВОЗВРАЩЕННАЯ ФУНКЦИЯ (из-за нее падал экран)
+  const focusInput = () => inputRef.current?.focus();
+
   useEffect(() => {
     let id = localStorage.getItem(DEVICE_KEY);
     if (!id) {
@@ -125,25 +128,9 @@ export default function LunaApp() {
     const channel = supabase.channel('luna_room');
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        // Жесткая защита: если ID уже есть в массиве - игнорируем
         setMessages((prev) => {
-          // 1. Проверяем точное совпадение ID (на всякий случай)
           if (prev.some(m => m.id === payload.new.id)) return prev;
-          
-          // 2. ИЩЕМ ДУБЛИКАТ (Заменяем временное сообщение от Оптимистичного UI на реальное из базы)
-          const tempMsgIndex = prev.findIndex(m => 
-            typeof m.id === 'string' && // У временных ID буквенный (UUID), у реальных - число
-            m.sender === payload.new.sender && 
-            ((m.content === payload.new.content && !m.image_url) || (m.image_url === payload.new.image_url && m.image_url))
-          );
-
-          if (tempMsgIndex !== -1) {
-            // Если нашли - просто подменяем его, дубликата не будет!
-            const newMessages = [...prev];
-            newMessages[tempMsgIndex] = payload.new;
-            return newMessages;
-          }
-
-          // 3. Если это реально новое сообщение от абонента - добавляем
           return [...prev, payload.new];
         });
       })
@@ -164,24 +151,16 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // --- ЧИСТАЯ ОТПРАВКА (Без двоения) ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
     
     const textToSend = newMessage;
-    setNewMessage('');
+    setNewMessage(''); // Очищаем поле мгновенно
     resetTimer();
     
-    const tempUiId = crypto.randomUUID();
-    const optimisticMsg = { 
-      id: tempUiId, 
-      content: textToSend, 
-      sender: deviceId, 
-      is_mine: true,
-      created_at: new Date().toISOString() 
-    };
-    setMessages(prev => [...prev, optimisticMsg]);
-    
+    // Отправляем в базу. Realtime сам нарисует его на экране через миллисекунды.
     const { error } = await supabase.from('messages').insert([{ 
       content: textToSend, 
       sender: deviceId,
@@ -207,22 +186,13 @@ export default function LunaApp() {
     
     const promptText = visionPrompt;
     setVisionPrompt('');
-    setIsGenerating(true);
+    setIsGenerating(true); // Крутим лоадер
     resetTimer();
 
     try {
-      const tempUiPromptId = crypto.randomUUID();
-      const promptMsg = { 
-        id: tempUiPromptId, 
-        content: `✨ Vision: ${promptText}`, 
-        sender: deviceId,
-        is_mine: true,
-        created_at: new Date().toISOString() 
-      };
-      setMessages(prev => [...prev, promptMsg]);
-      
+      // Промпт в базу
       await supabase.from('messages').insert([{ 
-        content: promptMsg.content, 
+        content: `✨ Vision: ${promptText}`, 
         sender: deviceId, 
         is_mine: true 
       }]);
@@ -236,18 +206,7 @@ export default function LunaApp() {
       const data = await response.json();
       
       if (data.imageUrl) {
-        const tempUiImgId = crypto.randomUUID();
-        const imgMsg = {
-          id: tempUiImgId,
-          content: '',
-          sender: 'ai',
-          image_url: data.imageUrl,
-          is_mine: false,
-          created_at: new Date().toISOString()
-        };
-        
-        setMessages(prev => [...prev, imgMsg]);
-
+        // Картинку в базу
         await supabase.from('messages').insert([{ 
           content: '', 
           sender: 'ai',
