@@ -49,7 +49,7 @@ export default function LunaApp() {
   const inputRef = useRef(null);
   const timerRef = useRef(null);
 
-  // Инициализация чистого ID устройства
+  // Инициализация ID устройства
   useEffect(() => {
     let id = localStorage.getItem(DEVICE_KEY);
     if (!id) {
@@ -140,7 +140,7 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- ОТПРАВКА (Чистая архитектура) ---
+  // --- ОТПРАВКА (Строго по схеме БД) ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
@@ -152,17 +152,17 @@ export default function LunaApp() {
     const optimisticMsg = { 
       id: crypto.randomUUID(), 
       content: textToSend, 
-      sender: deviceId, // Отправляем чистый ID
-      is_mine: true,
+      sender: deviceId, // Твой ID
+      type: 'text',     // Строго из схемы
       created_at: new Date().toISOString() 
     };
     setMessages(prev => [...prev, optimisticMsg]);
     
     const { error } = await supabase.from('messages').insert([{ 
       id: optimisticMsg.id,
-      content: textToSend, 
-      sender: deviceId,
-      is_mine: true 
+      content: optimisticMsg.content, 
+      sender: optimisticMsg.sender,
+      type: optimisticMsg.type
     }]);
 
     if (error) console.error("Ошибка БД:", error.message);
@@ -172,7 +172,6 @@ export default function LunaApp() {
     resetTimer();
     if (!confirm('LUNA: Удалить воспоминания навсегда?')) return;
     setIsDeleting(true);
-    // Удаляем всё
     const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     if (error) alert('Ошибка удаления: ' + error.message);
     setMessages([]);
@@ -189,19 +188,25 @@ export default function LunaApp() {
     resetTimer();
 
     try {
-      // 1. Сохраняем промпт в базу от нашего имени
+      // 1. Промпт в чат
       const promptId = crypto.randomUUID();
       const promptMsg = { 
         id: promptId, 
         content: `✨ Vision: ${promptText}`, 
         sender: deviceId,
-        is_mine: true,
+        type: 'text',
         created_at: new Date().toISOString() 
       };
       setMessages(prev => [...prev, promptMsg]);
-      await supabase.from('messages').insert([{ id: promptId, content: promptMsg.content, sender: deviceId, is_mine: true }]);
+      
+      await supabase.from('messages').insert([{ 
+        id: promptMsg.id, 
+        content: promptMsg.content, 
+        sender: promptMsg.sender, 
+        type: promptMsg.type 
+      }]);
 
-      // 2. Отправляем запрос к нашему API fal.ai
+      // 2. Запрос картинки
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,26 +215,26 @@ export default function LunaApp() {
       
       const data = await response.json();
       
+      // 3. Сохранение картинки от ИИ
       if (data.imageUrl) {
-        // 3. Сохраняем картинку от имени 'ai'
         const imgId = crypto.randomUUID();
         const imgMsg = {
           id: imgId,
           content: '',
           sender: 'ai',
+          type: 'image', // Строго из схемы
           image_url: data.imageUrl,
-          is_mine: false,
           created_at: new Date().toISOString()
         };
         
         setMessages(prev => [...prev, imgMsg]);
 
         const { error } = await supabase.from('messages').insert([{ 
-          id: imgId,
-          content: '', 
-          sender: 'ai',
-          image_url: data.imageUrl,
-          is_mine: false 
+          id: imgMsg.id,
+          content: imgMsg.content, 
+          sender: imgMsg.sender,
+          type: imgMsg.type,
+          image_url: imgMsg.image_url
         }]);
 
         if (error) console.error("Ошибка БД при сохранении фото:", error.message);
@@ -256,7 +261,7 @@ export default function LunaApp() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => {
-          // Идеально чистая логика разделения
+          // Разделение на основе поля sender
           const isMe = msg.sender === deviceId;
           const isAi = msg.sender === 'ai';
 
