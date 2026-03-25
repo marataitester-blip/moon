@@ -49,7 +49,6 @@ export default function LunaApp() {
   const inputRef = useRef(null);
   const timerRef = useRef(null);
 
-  // Инициализация ID устройства
   useEffect(() => {
     let id = localStorage.getItem(DEVICE_KEY);
     if (!id) {
@@ -140,7 +139,7 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- ОТПРАВКА (Строго по схеме БД) ---
+  // --- ИСПРАВЛЕННАЯ ОТПРАВКА (Без ID, без TYPE) ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
@@ -149,20 +148,22 @@ export default function LunaApp() {
     setNewMessage('');
     resetTimer();
     
+    // Временный ID только для отрисовки на экране
+    const tempUiId = crypto.randomUUID();
     const optimisticMsg = { 
-      id: crypto.randomUUID(), 
+      id: tempUiId, 
       content: textToSend, 
-      sender: deviceId, // Твой ID
-      type: 'text',     // Строго из схемы
+      sender: deviceId, 
+      is_mine: true,
       created_at: new Date().toISOString() 
     };
     setMessages(prev => [...prev, optimisticMsg]);
     
+    // В базу отправляем только то, что есть на скриншоте
     const { error } = await supabase.from('messages').insert([{ 
-      id: optimisticMsg.id,
-      content: optimisticMsg.content, 
-      sender: optimisticMsg.sender,
-      type: optimisticMsg.type
+      content: textToSend, 
+      sender: deviceId,
+      is_mine: true 
     }]);
 
     if (error) console.error("Ошибка БД:", error.message);
@@ -172,7 +173,8 @@ export default function LunaApp() {
     resetTimer();
     if (!confirm('LUNA: Удалить воспоминания навсегда?')) return;
     setIsDeleting(true);
-    const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    // Так как id это int8, удаляем все записи где id > 0
+    const { error } = await supabase.from('messages').delete().gt('id', 0);
     if (error) alert('Ошибка удаления: ' + error.message);
     setMessages([]);
     setIsDeleting(false);
@@ -189,21 +191,20 @@ export default function LunaApp() {
 
     try {
       // 1. Промпт в чат
-      const promptId = crypto.randomUUID();
+      const tempUiPromptId = crypto.randomUUID();
       const promptMsg = { 
-        id: promptId, 
+        id: tempUiPromptId, 
         content: `✨ Vision: ${promptText}`, 
         sender: deviceId,
-        type: 'text',
+        is_mine: true,
         created_at: new Date().toISOString() 
       };
       setMessages(prev => [...prev, promptMsg]);
       
       await supabase.from('messages').insert([{ 
-        id: promptMsg.id, 
         content: promptMsg.content, 
-        sender: promptMsg.sender, 
-        type: promptMsg.type 
+        sender: deviceId, 
+        is_mine: true 
       }]);
 
       // 2. Запрос картинки
@@ -217,27 +218,24 @@ export default function LunaApp() {
       
       // 3. Сохранение картинки от ИИ
       if (data.imageUrl) {
-        const imgId = crypto.randomUUID();
+        const tempUiImgId = crypto.randomUUID();
         const imgMsg = {
-          id: imgId,
+          id: tempUiImgId,
           content: '',
           sender: 'ai',
-          type: 'image', // Строго из схемы
           image_url: data.imageUrl,
+          is_mine: false,
           created_at: new Date().toISOString()
         };
         
         setMessages(prev => [...prev, imgMsg]);
 
-        const { error } = await supabase.from('messages').insert([{ 
-          id: imgMsg.id,
-          content: imgMsg.content, 
-          sender: imgMsg.sender,
-          type: imgMsg.type,
-          image_url: imgMsg.image_url
+        await supabase.from('messages').insert([{ 
+          content: '', 
+          sender: 'ai',
+          image_url: data.imageUrl,
+          is_mine: false 
         }]);
-
-        if (error) console.error("Ошибка БД при сохранении фото:", error.message);
       }
     } catch (err) { 
       console.error(err); 
@@ -261,9 +259,17 @@ export default function LunaApp() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => {
-          // Разделение на основе поля sender
-          const isMe = msg.sender === deviceId;
-          const isAi = msg.sender === 'ai';
+          // Обратная совместимость для старых сообщений (где sender = NULL)
+          let isMe = false;
+          let isAi = false;
+          
+          if (msg.sender) {
+            isMe = msg.sender === deviceId;
+            isAi = msg.sender === 'ai';
+          } else {
+            isMe = msg.is_mine;
+            isAi = !!msg.image_url;
+          }
 
           return (
             <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
