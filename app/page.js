@@ -6,7 +6,7 @@ import { Send, Sparkles, Loader2, Trash2, X } from 'lucide-react';
 // --- НАСТРОЙКИ ---
 const PIN_CODE = '7019';
 const SESSION_KEY = 'luna_session_token'; 
-const DEVICE_KEY = 'luna_device_id'; // Для отличия тебя от собеседника
+const DEVICE_KEY = 'luna_device_id'; 
 const INACTIVITY_LIMIT = 3 * 60 * 1000; 
 const GOLD_COLOR = '#C5A059'; 
 
@@ -15,16 +15,17 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Компонент для плавной загрузки фотографий
+// Обновленный компонент: добавлена защита от битых ссылок (onError)
 const ImageWithSkeleton = ({ src }) => {
   const [loaded, setLoaded] = useState(false);
   return (
-    <div className="relative min-h-[200px] w-full bg-[#111] rounded-lg overflow-hidden border border-[#333]">
+    <div className="relative min-h-[200px] w-full bg-[#111] rounded-xl overflow-hidden border border-[#222]">
       {!loaded && <div className="absolute inset-0 animate-pulse bg-[#1a1a1a]" />}
       <img 
         src={src} 
         alt="Vision" 
         onLoad={() => setLoaded(true)} 
+        onError={() => { setLoaded(true); console.error("Ошибка загрузки изображения по ссылке:", src); }}
         className={`w-full h-auto relative z-10 transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`} 
       />
     </div>
@@ -49,7 +50,6 @@ export default function LunaApp() {
   const inputRef = useRef(null);
   const timerRef = useRef(null);
 
-  // --- ИНИЦИАЛИЗАЦИЯ ИДЕНТИФИКАТОРА УСТРОЙСТВА ---
   useEffect(() => {
     let id = localStorage.getItem(DEVICE_KEY);
     if (!id) {
@@ -59,7 +59,6 @@ export default function LunaApp() {
     setDeviceId(id);
   }, []);
 
-  // --- ТАЙМЕР БЕЗОПАСНОСТИ ---
   const logout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setCurrentView('landing');
@@ -84,7 +83,6 @@ export default function LunaApp() {
     }
   }, [currentView]);
 
-  // --- ВХОД ---
   useEffect(() => {
     const session = sessionStorage.getItem(SESSION_KEY);
     if (session === 'active') setCurrentView('chat');
@@ -109,7 +107,6 @@ export default function LunaApp() {
 
   const focusInput = () => inputRef.current?.focus();
 
-  // --- ЧАТ (ЛОГИКА И REALTIME) ---
   useEffect(() => {
     if (currentView !== 'chat' || !deviceId) return;
 
@@ -124,7 +121,6 @@ export default function LunaApp() {
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         setMessages((prev) => {
-          // Защита от дубликатов (если мы уже добавили это сообщение оптимистично)
           if (prev.some(m => m.id === payload.new.id)) return prev;
           return [...prev, payload.new];
         });
@@ -149,7 +145,6 @@ export default function LunaApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- ОТПРАВКА СООБЩЕНИЙ (ОПТИМИСТИЧНЫЙ UI) ---
   const sendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!newMessage.trim()) return;
@@ -158,19 +153,21 @@ export default function LunaApp() {
     setNewMessage('');
     resetTimer();
     
-    // 1. Создаем временный ID и МГНОВЕННО показываем на экране
     const tempId = crypto.randomUUID();
     const optimisticMsg = { 
       id: tempId, 
       content: textToSend, 
       sender: deviceId, 
-      is_mine: true, // Оставлено для совместимости со старой БД
+      is_mine: true,
       created_at: new Date().toISOString() 
     };
     setMessages(prev => [...prev, optimisticMsg]);
     
-    // 2. Фоновая отправка в базу
-    await supabase.from('messages').insert([optimisticMsg]);
+    await supabase.from('messages').insert([{
+      content: optimisticMsg.content,
+      sender: optimisticMsg.sender,
+      is_mine: optimisticMsg.is_mine
+    }]);
   };
 
   const clearHistory = async () => {
@@ -183,6 +180,7 @@ export default function LunaApp() {
     setIsDeleting(false);
   };
 
+  // --- ОБНОВЛЕННАЯ ЛОГИКА ГЕНЕРАЦИИ (ОПТИМИСТИЧНЫЙ UI ДЛЯ КАРТИНОК) ---
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!visionPrompt.trim()) return;
@@ -193,18 +191,24 @@ export default function LunaApp() {
     resetTimer();
 
     try {
-      // Мгновенное отображение запроса
-      const tempId = crypto.randomUUID();
+      // 1. Показываем промпт в чате
+      const tempPromptId = crypto.randomUUID();
       const promptMsg = { 
-        id: tempId, 
+        id: tempPromptId, 
         content: `✨ Vision: ${promptText}`, 
         sender: deviceId, 
         is_mine: true,
         created_at: new Date().toISOString() 
       };
       setMessages(prev => [...prev, promptMsg]);
-      await supabase.from('messages').insert([promptMsg]);
+      
+      await supabase.from('messages').insert([{
+        content: promptMsg.content,
+        sender: promptMsg.sender,
+        is_mine: true
+      }]);
 
+      // 2. Делаем запрос к API
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -213,23 +217,42 @@ export default function LunaApp() {
       
       const data = await response.json();
       
+      // 3. Если получили картинку — МГНОВЕННО её рисуем
       if (data.imageUrl) {
-        // Ответ ИИ помечается как sender: 'ai'
-        await supabase.from('messages').insert([{ 
+        const tempImgId = crypto.randomUUID();
+        const imgMsg = {
+          id: tempImgId,
+          content: '',
+          sender: 'ai',
+          image_url: data.imageUrl,
+          is_mine: false,
+          created_at: new Date().toISOString()
+        };
+        
+        // Рисуем на экране до сохранения в базу
+        setMessages(prev => [...prev, imgMsg]);
+
+        // Сохраняем в Supabase и выводим ошибку, если база отклонила запись
+        const { error } = await supabase.from('messages').insert([{ 
           content: '', 
           sender: 'ai', 
           image_url: data.imageUrl,
           is_mine: false 
         }]);
+
+        if (error) {
+          console.error("Ошибка сохранения картинки в Supabase:", error);
+        }
+      } else {
+        console.error("Сервер не вернул imageUrl:", data);
       }
     } catch (err) { 
-      console.error(err); 
+      console.error("Ошибка сети или сервера:", err); 
     } finally { 
       setIsGenerating(false); 
     }
   };
 
-  // --- РЕНДЕР UI ---
   if (currentView === 'landing') {
     return (
       <div className="flex flex-col h-[100dvh] items-center justify-center bg-black text-white font-sans animate-fade-in">
@@ -281,20 +304,18 @@ export default function LunaApp() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => {
-          // Логика визуального разделения: Я, Партнер, ИИ
           const isMe = msg.sender === deviceId;
           const isAi = msg.sender === 'ai';
-          const isPartner = !isMe && !isAi;
 
           return (
             <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div 
                 className={`max-w-[85%] p-3 border transition-all ${
                   isMe 
-                    ? 'bg-[#1a150b] border-[#C5A059]/50 text-[#e8d4a6] rounded-2xl rounded-tr-none' // Твои
+                    ? 'bg-[#1a150b] border-[#C5A059]/50 text-[#e8d4a6] rounded-2xl rounded-tr-none' 
                     : isAi 
-                      ? 'bg-[#050505] border-[#C5A059]/30 shadow-[0_0_15px_rgba(197,160,89,0.1)] text-white rounded-2xl rounded-tl-none' // ИИ
-                      : 'bg-[#0a0a0a] border-zinc-800 text-zinc-300 rounded-2xl rounded-tl-none' // Партнер
+                      ? 'bg-[#050505] border-[#C5A059]/30 shadow-[0_0_15px_rgba(197,160,89,0.1)] text-white rounded-2xl rounded-tl-none' 
+                      : 'bg-[#0a0a0a] border-zinc-800 text-zinc-300 rounded-2xl rounded-tl-none' 
                 }`}
               >
                 {msg.image_url && <ImageWithSkeleton src={msg.image_url} />}
